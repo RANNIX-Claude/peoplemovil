@@ -46,7 +46,7 @@ Este archivo es el "contrato de trabajo" para futuras sesiones.
 | Fase 2 — Modelo de datos | ✅ | `db/reset_database.sql` + `MODELO_DATOS.md` |
 | Fase 3 — Módulos funcionales | ✅ | 7 páginas React + 5 Netlify Functions |
 | Fase 4 — UI (7 tabs) | ✅ | Dashboard, Personal, SitiosAsignacion, Checador, Nómina, Pricing, Configuración |
-| Fase 5 — Despliegue | ⚠️ Parcial | Git commit hecho. **Deploy Netlify requiere autenticación MCP** que no está autorizada en esta sesión — el usuario debe ejecutar `netlify deploy` manualmente o autorizar MCP Netlify. |
+| Fase 5 — Despliegue | ✅ | Deploy en vivo: **https://peoplemovil-app.netlify.app** (siteId `fe76a7cb-4cd3-4992-a427-24ef8278694b`, deployId `6a8b2069126dab04cffa4050`). Env vars pendientes (`VITE_SUPABASE_*`, `ANTHROPIC_API_KEY`, `RESEND_API_KEY`, `TWILIO_*`) — sin ellas la UI carga pero no se conecta a Supabase. |
 
 ## 5. Checklist de despliegue (Fase 5)
 
@@ -60,7 +60,7 @@ Este archivo es el "contrato de trabajo" para futuras sesiones.
 | 6 | Se ve bien en móvil | ✅ | Tailwind con clases responsivas (`sm:`, `md:`, `lg:`), tabs con overflow-x-auto, tablas con overflow-x-auto, cards en grid responsivo. |
 | 7 | Verificación de plan en base | ✅ | Triggers `tg_sitios_limite`, `tg_empleados_limite`, `tg_pedidos_plan` llaman a `verificar_limite()`. |
 | 8 | `git commit` con mensaje del brief | ✅ | Ver `git log`. |
-| 9 | Netlify deploy verificado por MCP | ⚠️ | MCP Netlify no está autorizado en esta sesión. Instrucciones abajo. |
+| 9 | Netlify deploy verificado por MCP | ✅ | Deploy en vivo en https://peoplemovil-app.netlify.app; deploy id `6a8b2069126dab04cffa4050`. |
 
 ## 6. Instrucciones para completar el deploy (usuario)
 
