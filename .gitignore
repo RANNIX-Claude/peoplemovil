@@ -1,0 +1,11 @@
+node_modules/
+dist/
+.env
+.env.local
+*.log
+.DS_Store
+.netlify/
+.vscode/
+*.xpz
+*.zip
+PeopleMovil_2.0_Documentacion_Completa/

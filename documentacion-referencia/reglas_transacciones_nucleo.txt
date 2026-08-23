@@ -1,0 +1,718 @@
+
+======================================================================
+TE_Empleados
+======================================================================
+<GxMultiForm rootId="1" version="html:15.0.0;layout:15.0.16"><Form id="1" type="layout"><detail><layout><table controlName="LayoutMainTable" tableType="Responsive" responsiveSizes="[]"><row><cell><table controlName="TableMain" class="TableMainTransaction" tableType="Responsive" responsiveSizes="[]"><row><cell><errorviewer controlName="ErrorViewer" class="ErrorViewer" /></cell></row><row><cell><table controlName="TableContent" class="TableContent" tableType="Responsive" responsiveSizes="[{&quot;scale&quot;:&quot;sm&quot;,&quot;rows&quot;:[[{&quot;width&quot;:75}]]},{&quot;scale&quot;:&quot;lg&quot;,&quot;rows&quot;:[[{&quot;width&quot;:50}]]}]"><row><cell><html controlName="Html_DVPanel_TableAttributes" formId="2" /></cell></row></table></cell></row><row><cell><actiongroup controlName="ActionGroup_Actions" /></cell></row></table></cell></row></table><actionGroups><actionGroup controlName="ActionGroup_Actions" class="TrnActionGroup"><item><action controlName="BtnTrn_Enter" onClickEvent="Enter" caption="GX_BtnEnter" class="Button" PATTERN_ELEMENT_CUSTOM_PROPERTIES="&lt;Properties&gt;&lt;Property&gt;&lt;Name&gt;title&lt;/Name&gt;&lt;Value&gt;GX_BtnEnter&lt;/Value&gt;&lt;/Property&gt;&lt;/Properties&gt;" /></item><item><action controlName="BtnTrn_Cancel" onClickEvent="Cancel" caption="GX_BtnCancel" class="BtnDefault" PATTERN_ELEMENT_CUSTOM_PROPERTIES="&lt;Properties&gt;&lt;Property&gt;&lt;Name&gt;title&lt;/Name&gt;&lt;Value&gt;GX_BtnCancel&lt;/Value&gt;&lt;/Property&gt;&lt;/Properties&gt;" /></item><item><action controlName="BtnTrn_Delete" onClickEvent="Delete" caption="GX_BtnDelete" class="BtnDefault" PATTERN_ELEMENT_CUSTOM_PROPERTIES="&lt;Properties&gt;&lt;Property&gt;&lt;Name&gt;title&lt;/Name&gt;&lt;Value&gt;GX_BtnDelete&lt;/Value&gt;&lt;/Property&gt;&lt;/Properties&gt;" /></item></actionGroup></actionGroups></layout></detail></Form><Form id="2" type="html"><BODY><gxDVelop.GXBootstrap.Panel ControlName="DVPanel_TableAttributes" AutoWidth="False" AutoHeight="True" Cls="PanelFilled_BaseColor" AutoScroll="False" Title="WWP_TemplateDataPanelTitle" Collapsible="False" Collapsed="False" ShowCollapseIcon="False" Width="100%" IconPosition="Left"><container containerId="Body"><gxLayout formId="3" ControlName="Layout_TableAttributes" /></container></gxDVelop.GXBootstrap.Panel></BODY></Form><Form id="3" type="layout"><detail><layout><table controlName="TableAttributes" class="TableData" tableType="Responsive" responsiveSizes="[]"><row><cell cellClass="DataContentCell"><data attribute="TE_EmpleadosId" labelCaption="Empleado" class="Attribute" PATTERN_ELEMENT_CUSTOM_PROPERTIES="&lt;Properties&gt;&lt;Property&gt;&lt;Name&gt;ControlType&lt;/Name&gt;&lt;Value&gt;Edit&lt;/Value&gt;&lt;/Property&gt;&lt;Property&gt;&lt;Name&gt;InputType&lt;/Name&gt;&lt;Value&gt;Values&lt;/Value&gt;&lt;/Property&gt;&lt;/Properties&gt;" /></cell></row><row><cell cellClass="DataContentCell"><data attribute="TE_EmpleadosNum" labelCaption="Num.empleado" class="Attribute" /></cell></row><row><cell cellClass="DataContentCell"><data attribute="TE_EmpleadosNom" labelCaption="Nombre" class="Attribute" /></cell></row><row><cell cellClass="DataContentCell"><data attribute="TE_EmpleadosApp" labelCaption="Paterno" class="Attribute" /></cell></row><row><cell cellClass="DataContentCell"><data attribute="TE_EmpleadosApm" labelCaption="Materno" class="Attribute" /></cell></row><row><cell cellClass="DataContentCell"><data attribute="TE_EmpleadosAlias" labelCaption="Alias" class="Attribute" /></cell></row><row><cell cellClass="DataContentCell"><data attribute="TE_EmpleadosNomcomp" labelCaption="Nombre Completo" class="Attribute" /></cell></row><row><cell cellClass="DataContentCell"><data attribute="TE_EmpleadosFoto" labelCaption="Foto" class="Attribute" /></cell></row><row><cell cellClass="DataContentCell"><data attribute="TE_EmpleadosSolici" labelCaption="Solicitud" class="Attribute" /></cell></row><row><cell cellClass="DataContentCell"><data attribute="TC_RegPagoId" labelCaption="Régimen" class="Attribute" /></cell></row><row><cell cellClass="DataContentCell"><data attribute="TC_RegPagoDes" labelCaption="Régimen" class="Attribute" /></cell></row><row><cell cellClass="DataContentCell"><data attribute="TC_SucursalPagId" labelCaption="Sociedad Pagadora" class="Attribute" /></cell></row><row><cell cellClass="DataContentCell"><data attribute="TC_SucursalPagDes" labelCaption="Sociedad Pagadora" class="Attribute" /></cell></row><row><cell cellClass="DataContentCell"><data attribute="TE_empleadosFormapgo" labelCaption="Forma de Pago" class="Attribute" /></cell></row><row><cell cellClass="DataContentCell"><data attribute="TE_empleadosBusqueda" labelCaption="Busqueda" class="Attribute" /></cell></row><row><cell cellClass="DataContentCell"><data attribute="TE_empleadosUser" labelCaption="Usuario" class="Attribute" /></cell></row></table></layout></detail></Form></GxMultiForm>
+
+/* Generated by DVelop Work With Plus Pattern [Start] - Do not change */
+[web]
+{
+parm(in:&Mode, in:&TE_EmpleadosId);
+
+Prompt(TC_SucursalPagPrompt, TC_SucursalPagId);
+TE_EmpleadosId = &TE_EmpleadosId if not &TE_EmpleadosId.IsEmpty();
+noaccept(TE_EmpleadosId) if not &TE_EmpleadosId.IsEmpty();
+noprompt(TE_EmpleadosId);
+
+TC_RegPagoId = &Insert_TC_RegPagoId if &Mode = TrnMode.Insert and not &Insert_TC_RegPagoId.IsEmpty();
+noaccept(TC_RegPagoId) if &Mode = TrnMode.Insert and not &Insert_TC_RegPagoId.IsEmpty();
+TC_SucursalPagId = &Insert_TC_SucursalPagId if &Mode = TrnMode.Insert and not &Insert_TC_SucursalPagId.IsEmpty();
+noaccept(TC_SucursalPagId) if &Mode = TrnMode.Insert and not &Insert_TC_SucursalPagId.IsEmpty();
+}
+
+/* Generated by DVelop Work With Plus Pattern [End] - Do not change */
+
+Event Start
+
+	/* Generated by DVelop Work With Plus Pattern [Start] - Do not change */
+
+	LoadWWPContext.Call(&WWPContext)
+
+	
+	&TrnContext.FromXml(&WebSession.Get(!"TrnContext"))
+	If (&TrnContext.TransactionName = &Pgmname and &Mode = TrnMode.Insert)
+		For &TrnContextAtt in &TrnContext.Attributes
+			Do Case
+				// When inserting with instantiated TC_RegPagoId
+				Case &TrnContextAtt.AttributeName = !"TC_RegPagoId"
+					&Insert_TC_RegPagoId.FromString(&TrnContextAtt.AttributeValue)
+				// When inserting with instantiated TC_SucursalPagId
+				Case &TrnContextAtt.AttributeName = !"TC_SucursalPagId"
+					&Insert_TC_SucursalPagId.FromString(&TrnContextAtt.AttributeValue)
+			Endcase
+		Endfor
+	Endif
+
+	/* Generated by DVelop Work With Plus Pattern [End] - Do not change */
+
+EndEvent
+
+Event After Trn
+
+	/* Generated by DVelop Work With Plus Pattern [Start] - Do not change */
+
+   [web]
+   {
+	
+	If (&Mode = TrnMode.Delete and not &TrnContext.CallerOnDelete)
+		TE_EmpleadosWW.Call()
+	Endif
+
+	Return
+   }
+
+	/* Generated by DVelop Work With Plus Pattern [End] - Do not change */
+
+EndEvent
+
+
+======================================================================
+TE_EmpleadosGeneral
+======================================================================
+<GxMultiForm rootId="1" version="html:15.0.0;layout:15.0.16"><Form id="1" type="layout"><detail><layout><table controlName="LayoutMainTable" tableType="Responsive" responsiveSizes="[]"><row><cell><table controlName="Table" class="" tableType="Responsive" responsiveSizes="[]"><row><cell><table controlName="TransactionDetail_TableAttributes" class="TableData" tableType="Responsive" responsiveSizes="[]"><row><cell cellClass="DataContentCell"><data attribute="TE_EmpleadosId" labelCaption="Empleado" class="ReadonlyAttribute" /></cell></row><row><cell cellClass="DataContentCell"><data attribute="TE_EmpleadosNum" labelCaption="Num.empleado" class="ReadonlyAttribute" /></cell></row><row><cell cellClass="DataContentCell"><data attribute="TE_EmpleadosNom" labelCaption="Nombre" class="ReadonlyAttribute" /></cell></row><row><cell cellClass="DataContentCell"><data attribute="TE_EmpleadosApp" labelCaption="Paterno" class="ReadonlyAttribute" /></cell></row><row><cell cellClass="DataContentCell"><data attribute="TE_EmpleadosApm" labelCaption="Materno" class="ReadonlyAttribute" /></cell></row><row><cell cellClass="DataContentCell"><data attribute="TE_EmpleadosAlias" labelCaption="Alias" class="ReadonlyAttribute" /></cell></row><row><cell cellClass="DataContentCell"><data attribute="TE_EmpleadosNomcomp" labelCaption="Nombre Completo" class="ReadonlyAttribute" /></cell></row><row><cell cellClass="DataContentCell"><data attribute="TE_EmpleadosFoto" labelCaption="Foto" class="ReadonlyAttribute" /></cell></row><row><cell cellClass="DataContentCell"><data attribute="TE_EmpleadosSolici" labelCaption="Solicitud" class="ReadonlyAttribute" /></cell></row><row><cell cellClass="DataContentCell"><data attribute="TC_RegPagoId" labelCaption="Régimen" class="ReadonlyAttribute" /></cell></row><row><cell cellClass="DataContentCell"><data attribute="TC_RegPagoDes" labelCaption="Régimen" class="ReadonlyAttribute" /></cell></row><row><cell cellClass="DataContentCell"><data attribute="TC_SucursalPagId" labelCaption="Sociedad Pagadora" class="ReadonlyAttribute" /></cell></row><row><cell cellClass="DataContentCell"><data attribute="TC_SucursalPagDes" labelCaption="Sociedad Pagadora" class="ReadonlyAttribute" /></cell></row><row><cell cellClass="DataContentCell"><data attribute="TE_empleadosFormapgo" labelCaption="Forma de Pago" class="ReadonlyAttribute" /></cell></row><row><cell cellClass="DataContentCell"><data attribute="TE_empleadosBusqueda" labelCaption="Busqueda" class="ReadonlyAttribute" /></cell></row><row><cell cellClass="DataContentCell"><data attribute="TE_empleadosUser" labelCaption="Usuario" class="ReadonlyAttribute" /></cell></row></table></cell></row><row><cell><actiongroup controlName="ActionGroup_Actions" /></cell></row></table></cell></row></table><actionGroups><actionGroup controlName="ActionGroup_Actions" class="TrnActionGroup"><item><action controlName="BtnUpdate" onClickEvent="'DoUpdate'" caption="GXM_update" class="Button" PATTERN_ELEMENT_CUSTOM_PROPERTIES="&lt;Properties&gt;&lt;Property&gt;&lt;Name&gt;title&lt;/Name&gt;&lt;Value&gt;GXM_update&lt;/Value&gt;&lt;/Property&gt;&lt;/Properties&gt;" /></item><item><action controlName="BtnDelete" onClickEvent="'DoDelete'" caption="GX_BtnDelete" class="BtnDefault" PATTERN_ELEMENT_CUSTOM_PROPERTIES="&lt;Properties&gt;&lt;Property&gt;&lt;Name&gt;title&lt;/Name&gt;&lt;Value&gt;GX_BtnDelete&lt;/Value&gt;&lt;/Property&gt;&lt;/Properties&gt;" /></item></actionGroup></actionGroups></layout></detail></Form></GxMultiForm>
+
+/* Generated by DVelop Work With Plus Pattern [Start] - Do not change */
+
+parm(in:TE_EmpleadosId);
+
+	/* Generated by DVelop Work With Plus Pattern [End] - Do not change */
+
+Event Start
+
+	/* Generated by DVelop Work With Plus Pattern [Start] - Do not change */
+
+	LoadWWPContext.Call(&WWPContext)
+
+	
+	Do 'PrepareTransaction'
+
+	/* Generated by DVelop Work With Plus Pattern [End] - Do not change */
+
+EndEvent
+
+Event Load
+
+	/* Generated by DVelop Work With Plus Pattern [Start] - Do not change */
+
+	// Security check for 'Actions'
+	&TempBoolean = SecGAMIsAuthByFunctionalityKey.Udp(!'te_empleados_Update')
+	If not (&TempBoolean)
+		BtnUpdate.Visible = False
+	Endif
+	&TempBoolean = SecGAMIsAuthByFunctionalityKey.Udp(!'te_empleados_Delete')
+	If not (&TempBoolean)
+		BtnDelete.Visible = False
+	Endif
+
+	/* Generated by DVelop Work With Plus Pattern [End] - Do not change */
+
+EndEvent
+
+Event 'DoUpdate'
+
+	/* Generated by DVelop Work With Plus Pattern [Start] - Do not change */
+
+	TE_Empleados.Call(TrnMode.Update, TE_EmpleadosId)
+
+	/* Generated by DVelop Work With Plus Pattern [End] - Do not change */
+
+EndEvent
+
+Event 'DoDelete'
+
+	/* Generated by DVelop Work With Plus Pattern [Start] - Do not change */
+
+	TE_Empleados.Call(TrnMode.Delete, TE_EmpleadosId)
+
+	/* Generated by DVelop Work With Plus Pattern [End] - Do not change */
+
+EndEvent
+
+Sub 'PrepareTransaction'
+
+	/* Generated by DVelop Work With Plus Pattern [Start] - Do not change */
+
+	&TrnContext = new()
+	&TrnContext.CallerObject = &Pgmname
+	&TrnContext.CallerOnDelete = False
+	&TrnContext.CallerURL = &HTTPRequest.ScriptName + !"?" + &HTTPRequest.QueryString
+	&TrnContext.TransactionName = !"TE_Empleados"
+
+	&TrnContextAtt = new()
+	&TrnContextAtt.AttributeName = !"TE_EmpleadosId"
+	&TrnContextAtt.AttributeValue = &TE_EmpleadosId.ToString()
+	&TrnContext.Attributes.Add(&TrnContextAtt)
+
+	&Session.Set(!"TrnContext", &TrnContext.ToXml())
+
+	/* Generated by DVelop Work With Plus Pattern [End] - Do not change */
+
+EndSub
+
+
+======================================================================
+TE_Reservacion
+======================================================================
+<GxMultiForm rootId="1" version="html:15.0.0;layout:15.0.16"><Form id="1" type="layout"><detail><layout><table controlName="LayoutMainTable" tableType="Responsive" responsiveSizes="[]"><row><cell><table controlName="TableMain" class="TableMainTransaction" tableType="Responsive" responsiveSizes="[]"><row><cell><errorviewer controlName="ErrorViewer" class="ErrorViewer" /></cell></row><row><cell><table controlName="TableContent" class="TableContent" tableType="Responsive" responsiveSizes="[{&quot;scale&quot;:&quot;sm&quot;,&quot;rows&quot;:[[{&quot;width&quot;:75}]]},{&quot;scale&quot;:&quot;lg&quot;,&quot;rows&quot;:[[{&quot;width&quot;:50}]]}]"><row><cell><html controlName="Html_DVPanel_TableAttributes" formId="2" /></cell></row></table></cell></row><row><cell><actiongroup controlName="ActionGroup_Actions" /></cell></row></table></cell></row></table><actionGroups><actionGroup controlName="ActionGroup_Actions" class="TrnActionGroup"><item><action controlName="BtnTrn_Enter" onClickEvent="Enter" caption="GX_BtnEnter" class="Button" PATTERN_ELEMENT_CUSTOM_PROPERTIES="&lt;Properties&gt;&lt;Property&gt;&lt;Name&gt;title&lt;/Name&gt;&lt;Value&gt;GX_BtnEnter&lt;/Value&gt;&lt;/Property&gt;&lt;/Properties&gt;" /></item><item><action controlName="BtnTrn_Cancel" onClickEvent="Cancel" caption="GX_BtnCancel" class="BtnDefault" PATTERN_ELEMENT_CUSTOM_PROPERTIES="&lt;Properties&gt;&lt;Property&gt;&lt;Name&gt;title&lt;/Name&gt;&lt;Value&gt;GX_BtnCancel&lt;/Value&gt;&lt;/Property&gt;&lt;/Properties&gt;" /></item><item><action controlName="BtnTrn_Delete" onClickEvent="Delete" caption="GX_BtnDelete" class="BtnDefault" PATTERN_ELEMENT_CUSTOM_PROPERTIES="&lt;Properties&gt;&lt;Property&gt;&lt;Name&gt;title&lt;/Name&gt;&lt;Value&gt;GX_BtnDelete&lt;/Value&gt;&lt;/Property&gt;&lt;/Properties&gt;" /></item></actionGroup></actionGroups></layout></detail></Form><Form id="2" type="html"><BODY><gxDVelop.GXBootstrap.Panel ControlName="DVPanel_TableAttributes" AutoWidth="False" AutoHeight="True" Cls="PanelFilled_BaseColor" AutoScroll="False" Title="WWP_TemplateDataPanelTitle" Collapsible="False" Collapsed="False" ShowCollapseIcon="False" Width="100%" IconPosition="Left"><container containerId="Body"><gxLayout formId="3" ControlName="Layout_TableAttributes" /></container></gxDVelop.GXBootstrap.Panel></BODY></Form><Form id="3" type="layout"><detail><layout><table controlName="TableAttributes" class="TableData" tableType="Responsive" responsiveSizes="[]"><row><cell cellClass="DataContentCell"><data attribute="TE_ReservacionID" labelCaption="TE_Reservacion ID" class="Attribute" PATTERN_ELEMENT_CUSTOM_PROPERTIES="&lt;Properties&gt;&lt;Property&gt;&lt;Name&gt;ControlType&lt;/Name&gt;&lt;Value&gt;Edit&lt;/Value&gt;&lt;/Property&gt;&lt;Property&gt;&lt;Name&gt;InputType&lt;/Name&gt;&lt;Value&gt;Values&lt;/Value&gt;&lt;/Property&gt;&lt;/Properties&gt;" /></cell></row><row><cell cellClass="DataContentCell"><data attribute="TE_ReservacionTitulo" labelCaption="TE_Reservacion Titulo" class="Attribute" /></cell></row><row><cell cellClass="DataContentCell"><data attribute="TE_EmpIdEmpleadoEventual" labelCaption="Id Emp." class="Attribute" /></cell></row><row><cell cellClass="DataContentCell"><data attribute="TE_EmpleadoBuscar" labelCaption="Nombre completo--Alias" class="Attribute" /></cell></row><row><cell cellClass="DataContentCell"><data attribute="TE_EmpleadoBusXNombre" labelCaption="Nombre" class="Attribute" /></cell></row><row><cell cellClass="DataContentCell"><data attribute="TE_EmpCorreo_Electronico" labelCaption="Correo electrónico" class="Attribute" /></cell></row><row><cell cellClass="DataContentCell"><data attribute="TE_EmpPorPuntualidad" labelCaption="Puntualidad" class="Attribute" /></cell></row><row><cell cellClass="DataContentCell"><data attribute="TE_EmpRegPago" labelCaption="Régimen de pago" class="Attribute" /></cell></row><row><cell cellClass="DataContentCell"><data attribute="TC_bancosNombre" labelCaption="Nombre" class="Attribute" /></cell></row><row><cell cellClass="DataContentCell"><data attribute="TE_EmpCuenta_Banco" labelCaption="Cuenta Banco" class="Attribute" /></cell></row><row><cell cellClass="DataContentCell"><data attribute="TC_EmpresaPagadoraId" labelCaption="Id" class="Attribute" /></cell></row><row><cell cellClass="DataContentCell"><data attribute="TC_EmpresaPagadoraNombre" labelCaption="Nombre" class="Attribute" /></cell></row><row><cell cellClass="DataContentCell"><data attribute="TE_ReservacionPorcentajePuntualidad" labelCaption="Porcentaje Puntualidad" class="Attribute" /></cell></row><row><cell cellClass="DataContentCell"><data attribute="TE_pedDetId" labelCaption="TE_ped Det Id" class="Attribute" /></cell></row><row><cell cellClass="DataContentCell"><data attribute="TE_PeddetCancelar" labelCaption="Permitir Cancelar" class="Attribute" /></cell></row><row><cell cellClass="DataContentCell"><data attribute="TE_PedidoTitulo" labelCaption="Título" class="Attribute" /></cell></row><row><cell cellClass="DataContentCell"><data attribute="TC_PepPep" labelCaption="PEP" class="Attribute" /></cell></row><row><cell cellClass="DataContentCell"><data attribute="TC_Pepdes" labelCaption="Pep" class="Attribute" /></cell></row><row><cell cellClass="DataContentCell"><data attribute="TC_SucursalPagId" labelCaption="Id.Sociedad" class="Attribute" /></cell></row><row><cell cellClass="DataContentCell"><data attribute="TC_SucursalPagDes" labelCaption="Sociedad Pagadora" class="Attribute" /></cell></row><row><cell cellClass="DataContentCell"><data attribute="TE_pedDetCompSim" labelCaption="TE_ped Det Comp Sim" class="Attribute" /></cell></row><row><cell cellClass="DataContentCell"><data attribute="TC_PuestosFalta" labelCaption="Falta" class="Attribute" /></cell></row><row><cell cellClass="DataContentCell"><data attribute="TC_PuestosRetardo" labelCaption="Retardo" class="Attribute" /></cell></row><row><cell cellClass="DataContentCell"><data attribute="TC_Puestosmatri" labelCaption="Matricial" class="AttributeCheckBox" /></cell></row><row><cell cellClass="DataContentCell"><data attribute="TE_PeddetBloqueNum" labelCaption="TE_Peddet Bloque Num" class="Attribute" /></cell></row><row><cell cellClass="DataContentCell"><data attribute="TC_FaseEventoID" labelCaption="Fase" class="Attribute" /></cell></row><row><cell cellClass="DataContentCell"><data attribute="TC_FaseEventoDEs" labelCaption="Descripción Fase" class="Attribute" /></cell></row><row><cell cellClass="DataContentCell"><data attribute="TE_PeddetFechacitaJunta" labelCaption="Cíta" class="AttributeDateTime" /></cell></row><row><cell cellClass="DataContentCell"><data attribute="TE_PeddetFechacitaFin" labelCaption="Fecha final cita" class="Attribute" /></cell></row><row><cell cellClass="DataContentCell"><data attribute="TE_PeddetFechafincitaoculta" labelCaption="Final" class="AttributeDateTime" /></cell></row><row><cell cellClass="DataContentCell"><data attribute="TC_PuestosHrasAntesCanPed" labelCaption="H.antes Can. Conf." class="Attribute" /></cell></row><row><cell cellClass="DataContentCell"><data attribute="TE_PedidoDuracionDias" labelCaption="Duración del evento(Días de show)" class="Attribute" /></cell></row><row><cell cellClass="DataContentCell"><data attribute="TC_complejoid" labelCaption="Tipo de complejidad" class="Attribute" /></cell></row><row><cell cellClass="DataContentCell"><data attribute="ST_UnidadNegPedId" labelCaption="Unidad de negocio" class="Attribute" /></cell></row><row><cell cellClass="DataContentCell"><data attribute="ST_UnidadNegPedDes" labelCaption="Unidad de negocio" class="Attribute" /></cell></row><row><cell cellClass="DataContentCell"><data attribute="TC_UnidadNegID" labelCaption="Id Und.Neg." class="Attribute" /></cell></row><row><cell cellClass="DataContentCell"><data attribute="TC_UnidadNegDes" labelCaption="Unidad de negocio" class="Attribute" /></cell></row><row><cell cellClass="DataContentCell"><data attribute="TC_SociedadesPagadorasID" labelCaption="ID Soc.pag." class="Attribute" /></cell></row><row><cell cellClass="DataContentCell"><data attribute="TC_SociedadesPagadorasDes" labelCaption="Sociedad pagadora" class="Attribute" /></cell></row><row><cell cellClass="DataContentCell"><data attribute="TC_SociedadID" labelCaption="TC_Sociedad ID" class="Attribute" /></cell></row><row><cell cellClass="DataContentCell"><data attribute="TC_SociedadDes" labelCaption="Sociedad" class="Attribute" /></cell></row><row><cell cellClass="DataContentCell"><data attribute="TE_PeddetProductoTitulo" labelCaption="TE_Peddet Producto Titulo" class="Attribute" /></cell></row><row><cell cellClass="DataContentCell"><data attribute="TE_ReservacionIdPedido" labelCaption="TE_Reservacion Id Pedido" class="Attribute" /></cell></row><row><cell cellClass="DataContentCell"><data attribute="TE_ReservacionStatus" labelCaption="Estatus" class="Attribute" /></cell></row><row><cell cellClass="DataContentCell"><data attribute="TE_ReservacionCitaInicio" labelCaption="TE_Reservacion Cita Inicio" class="AttributeDateTime" /></cell></row><row><cell cellClass="DataContentCell"><data attribute="TE_ReservacionCitaFin" labelCaption="TE_Reservacion Cita Fin" class="AttributeDateTime" /></cell></row><row><cell cellClass="DataContentCell"><data attribute="TE_ReservacionTipo" labelCaption="Tipo" class="Attribute" /></cell></row><row><cell cellClass="DataContentCell"><data attribute="TE_ReservacionHoraEntradaAsistencia" labelCaption="Entrada Asistencia" class="AttributeDateTime" /></cell></row><row><cell cellClass="DataContentCell"><data attribute="TE_ReservacionHoraSalidaAsistencia" labelCaption="Salida Asistencia" class="AttributeDateTime" /></cell></row><row><cell cellClass="DataContentCell"><data attribute="TE_ReservacionEstadoAsistencia" labelCaption="TE_Reservacion Estado Asistencia" class="Attribute" /></cell></row><row><cell cellClass="DataContentCell"><data attribute="TE_ReservacionMedioAsistencia" labelCaption="TE_Reservacion Medio Asistencia" class="Attribute" /></cell></row><row><cell cellClass="DataContentCell"><data attribute="TE_ReservacionPagoPorTurno" labelCaption="TE_Reservacion Pago Por Turno" class="Attribute" /></cell></row><row><cell cellClass="DataContentCell"><data attribute="TE_ReservacionPagoProgramado" labelCaption="TE_Reservacion Pago Programado" class="Attribute" /></cell></row><row><cell cellClass="DataContentCell"><data attribute="TE_ReservacionPagoReal" labelCaption="TE_Reservacion Pago Real" class="Attribute" /></cell></row><row><cell cellClass="DataContentCell"><data attribute="TE_ReservacionPeriodoAsistencia" labelCaption="Periodo Asistencia" class="Attribute" /></cell></row><row><cell cellClass="DataContentCell"><data attribute="TE_ReservPeriodoCobrado" labelCaption="TE_Reserv Periodo Cobrado" class="Attribute" /></cell></row><row><cell cellClass="DataContentCell"><data attribute="TE_ReservacionAnioCobrado" labelCaption="TE_Reservacion Anio Cobrado" class="Attribute" /></cell></row><row><cell cellClass="DataContentCell"><data attribute="TE_ReservacionDuracionEnTurnos" labelCaption="TE_Reservacion Duracion En Turnos" class="Attribute" /></cell></row><row><cell cellClass="DataContentCell"><data attribute="TE_ReservacionIdProductoEvento" labelCaption="TE_Reservacion Id Producto Evento" class="Attribute" /></cell></row><row><cell cellClass="DataContentCell"><data attribute="TE_ReservacionIdPuestoEvento" labelCaption="TE_Reservacion Id Puesto Evento" class="Attribute" /></cell></row><row><cell cellClass="DataContentCell"><data attribute="TE_ReservacionFormaDePago" labelCaption="TE_Reservacion Forma De Pago" class="Attribute" /></cell></row><row><cell cellClass="DataContentCell"><data attribute="TE_ReservacionBloque" labelCaption="TE_Reservacion Bloque" class="Attribute" /></cell></row><row><cell cellClass="DataContentCell"><data attribute="TE_ReservacionSeriado" labelCaption="TE_Reservacion Seriado" class="Attribute" /></cell></row><row><cell cellClass="DataContentCell"><data attribute="TE_ReservacionUnidadDeNegocio" labelCaption="TE_Reservacion Unidad De Negocio" class="Attribute" /></cell></row><row><cell cellClass="DataContentCell"><data attribute="TE_ReservacionSociedad" labelCaption="TE_Reservacion Sociedad" class="Attribute" /></cell></row><row><cell cellClass="DataContentCell"><data attribute="TE_ReservacionObservaciones" labelCaption="TE_Reservacion Observaciones" class="Attribute" /></cell></row><row><cell cellClass="DataContentCell"><data attribute="TE_ReservacionIP" labelCaption="TE_Reservacion IP" class="Attribute" /></cell></row><row><cell cellClass="DataContentCell"><data attribute="TE_ReservIacionTimescanEntrada" labelCaption="TE_Reserv Iacion Timescan Entrada" class="Attribute" /></cell></row><row><cell cellClass="DataContentCell"><data attribute="TE_ReservacionIdTimescanSalida" labelCaption="TE_Reservacion Id Timescan Salida" class="Attribute" /></cell></row><row><cell cellClass="DataContentCell"><data attribute="TE_ReservacionEstacionEntrada" labelCaption="TE_Reservacion Estacion Entrada" class="Attribute" /></cell></row><row><cell cellClass="DataContentCell"><data attribute="TE_ReservacionEstacionSalida" labelCaption="TE_Reservacion Estacion Salida" class="Attribute" /></cell></row><row><cell cellClass="DataContentCell"><data attribute="TE_ReservacionPenalizacionSueldo" labelCaption="Penalizacion Sueldo" class="Attribute" /></cell></row><row><cell cellClass="DataContentCell"><data attribute="TE_ReservacionPenalizacionDias" labelCaption="TE_Reservacion Penalizacion Dias" class="Attribute" /></cell></row><row><cell cellClass="DataContentCell"><data attribute="TE_ReservacionReglaAplicada" labelCaption="TE_Reservacion Regla Aplicada" class="Attribute" /></cell></row><row><cell cellClass="DataContentCell"><data attribute="TE_ReservacionTipoRegistroTimeScan" labelCaption="Time Scan" class="Attribute" /></cell></row><row><cell cellClass="DataContentCell"><data attribute="TE_ReservacionCreado" labelCaption="TE_Reservacion Creado" class="AttributeDateTime" /></cell></row><row><cell cellClass="DataContentCell"><data attribute="TE_ReservacionCreadoPor" labelCaption="TE_Reservacion Creado Por" class="Attribute" /></cell></row><row><cell cellClass="DataContentCell"><data attribute="TE_ReservacionModificado" labelCaption="TE_Reservacion Modificado" class="AttributeDateTime" /></cell></row><row><cell cellClass="DataContentCell"><data attribute="TE_ReservacionModificadoPor" labelCaption="TE_Reservacion Modificado Por" class="Attribute" /></cell></row><row><cell cellClass="DataContentCell"><data attribute="TE_ReservacionFolioHonorarios" labelCaption="TE_Reservacion Folio Honorarios" class="Attribute" /></cell></row><row><cell cellClass="DataContentCell"><data attribute="TE_ReservacionIdReservacion_Lobo" labelCaption="Id Reservacion_Lobo" class="Attribute" /></cell></row><row><cell cellClass="DataContentCell"><data attribute="TE_ReservacionEnvioCorreoEmpalmes" labelCaption="Correo Empalmes" class="Attribute" /></cell></row><row><cell cellClass="DataContentCell"><data attribute="TE_ReservaciontpIdPlaza" labelCaption="TE_Reservaciontp Id Plaza" class="Attribute" /></cell></row><row><cell cellClass="DataContentCell"><data attribute="TE_ReservacionSaldoVencido" labelCaption="TE_Reservacion Saldo Vencido" class="Attribute" /></cell></row><row><cell cellClass="DataContentCell"><data attribute="TE_ReservacionIdPagoHonorario" labelCaption="TE_Reservacion Id Pago Honorario" class="Attribute" /></cell></row><row><cell cellClass="DataContentCell"><data attribute="TE_ReservacionIdPagoHonorario_Lista" labelCaption="Pago Honorario_Lista" class="Attribute" /></cell></row><row><cell cellClass="DataContentCell"><data attribute="TE_ReservacionSinPlazaParaPago" labelCaption="TE_Reservacion Sin Plaza Para Pago" class="Attribute" /></cell></row><row><cell cellClass="DataContentCell"><data attribute="TE_ReservacionCampo0" labelCaption="TE_Reservacion Campo0" class="Attribute" /></cell></row><row><cell cellClass="DataContentCell"><data attribute="TE_ReservacionBorrar" labelCaption="Borrar" class="Attribute" /></cell></row><row><cell cellClass="DataContentCell"><data attribute="TE_ReservacionHoraReservacion" labelCaption="Hora REservacion" class="AttributeDateTime" /></cell></row><row><cell cellClass="DataContentCell"><data attribute="TE_ReservacionEstatusPago" labelCaption="Pago" class="AttributeCheckBox" /></cell></row></table></layout></detail></Form></GxMultiForm>
+
+/* Generated by DVelop Work With Plus Pattern [Start] - Do not change */
+[web]
+{
+parm(in:&Mode, in:&TE_ReservacionID);
+
+Prompt(TE_EmpleadoPrompt, TE_EmpIdEmpleadoEventual, TE_EmpIdEmpleadoEventual);
+Prompt(WP_PromptPedidosDetallesFacturas, TE_pedDetId);
+TE_ReservacionID = &TE_ReservacionID if not &TE_ReservacionID.IsEmpty();
+noaccept(TE_ReservacionID) if not &TE_ReservacionID.IsEmpty();
+noprompt(TE_ReservacionID);
+
+TE_EmpIdEmpleadoEventual = &Insert_TE_EmpIdEmpleadoEventual if &Mode = TrnMode.Insert and not &Insert_TE_EmpIdEmpleadoEventual.IsEmpty();
+noaccept(TE_EmpIdEmpleadoEventual) if &Mode = TrnMode.Insert and not &Insert_TE_EmpIdEmpleadoEventual.IsEmpty();
+TE_pedDetId = &Insert_TE_pedDetId if &Mode = TrnMode.Insert and not &Insert_TE_pedDetId.IsEmpty();
+noaccept(TE_pedDetId) if &Mode = TrnMode.Insert and not &Insert_TE_pedDetId.IsEmpty();
+}
+
+/* Generated by DVelop Work With Plus Pattern [End] - Do not change */
+
+Event Start
+
+	/* Generated by DVelop Work With Plus Pattern [Start] - Do not change */
+
+	LoadWWPContext.Call(&WWPContext)
+
+	
+	&TrnContext.FromXml(&WebSession.Get(!"TrnContext"))
+	If (&TrnContext.TransactionName = &Pgmname and &Mode = TrnMode.Insert)
+		For &TrnContextAtt in &TrnContext.Attributes
+			Do Case
+				// When inserting with instantiated TE_EmpIdEmpleadoEventual
+				Case &TrnContextAtt.AttributeName = !"TE_EmpIdEmpleadoEventual"
+					&Insert_TE_EmpIdEmpleadoEventual.FromString(&TrnContextAtt.AttributeValue)
+				// When inserting with instantiated TE_pedDetId
+				Case &TrnContextAtt.AttributeName = !"TE_pedDetId"
+					&Insert_TE_pedDetId.FromString(&TrnContextAtt.AttributeValue)
+			Endcase
+		Endfor
+	Endif
+
+	/* Generated by DVelop Work With Plus Pattern [End] - Do not change */
+
+EndEvent
+
+Event After Trn
+
+	/* Generated by DVelop Work With Plus Pattern [Start] - Do not change */
+
+   [web]
+   {
+	
+	If (&Mode = TrnMode.Delete and not &TrnContext.CallerOnDelete)
+		TE_ReservacionWW.Call()
+	Endif
+
+	Return
+   }
+
+	/* Generated by DVelop Work With Plus Pattern [End] - Do not change */
+
+EndEvent
+
+
+======================================================================
+TE_ReservacionGeneral
+======================================================================
+<GxMultiForm rootId="1" version="html:15.0.0;layout:15.0.16"><Form id="1" type="layout"><detail><layout><table controlName="LayoutMainTable" tableType="Responsive" responsiveSizes="[]"><row><cell><table controlName="Table" class="" tableType="Responsive" responsiveSizes="[]"><row><cell><table controlName="TransactionDetail_TableAttributes" class="TableData" tableType="Responsive" responsiveSizes="[]"><row><cell cellClass="DataContentCell"><data attribute="TE_ReservacionID" labelCaption="TE_Reservacion ID" class="ReadonlyAttribute" /></cell></row><row><cell cellClass="DataContentCell"><data attribute="TE_ReservacionTitulo" labelCaption="TE_Reservacion Titulo" class="ReadonlyAttribute" /></cell></row><row><cell cellClass="DataContentCell"><data attribute="TE_EmpIdEmpleadoEventual" labelCaption="Id Emp." class="ReadonlyAttribute" /></cell></row><row><cell cellClass="DataContentCell"><data attribute="TE_EmpleadoBuscar" labelCaption="Nombre completo--Alias" class="ReadonlyAttribute" /></cell></row><row><cell cellClass="DataContentCell"><data attribute="TE_EmpleadoBusXNombre" labelCaption="Nombre" class="ReadonlyAttribute" /></cell></row><row><cell cellClass="DataContentCell"><data attribute="TE_EmpCorreo_Electronico" labelCaption="Correo electrónico" class="ReadonlyAttribute" /></cell></row><row><cell cellClass="DataContentCell"><data attribute="TE_EmpPorPuntualidad" labelCaption="Puntualidad" class="ReadonlyAttribute" /></cell></row><row><cell cellClass="DataContentCell"><data attribute="TE_EmpRegPago" labelCaption="Régimen de pago" class="ReadonlyAttribute" /></cell></row><row><cell cellClass="DataContentCell"><data attribute="TC_bancosNombre" labelCaption="Nombre" class="ReadonlyAttribute" /></cell></row><row><cell cellClass="DataContentCell"><data attribute="TE_EmpCuenta_Banco" labelCaption="Cuenta Banco" class="ReadonlyAttribute" /></cell></row><row><cell cellClass="DataContentCell"><data attribute="TC_EmpresaPagadoraId" labelCaption="Id" class="ReadonlyAttribute" /></cell></row><row><cell cellClass="DataContentCell"><data attribute="TC_EmpresaPagadoraNombre" labelCaption="Nombre" class="ReadonlyAttribute" /></cell></row><row><cell cellClass="DataContentCell"><data attribute="TE_ReservacionPorcentajePuntualidad" labelCaption="Porcentaje Puntualidad" class="ReadonlyAttribute" /></cell></row><row><cell cellClass="DataContentCell"><data attribute="TE_pedDetId" labelCaption="TE_ped Det Id" class="ReadonlyAttribute" /></cell></row><row><cell cellClass="DataContentCell"><data attribute="TE_PeddetCancelar" labelCaption="Permitir Cancelar" class="ReadonlyAttribute" /></cell></row><row><cell cellClass="DataContentCell"><data attribute="TE_PedidoTitulo" labelCaption="Título" class="ReadonlyAttribute" /></cell></row><row><cell cellClass="DataContentCell"><data attribute="TC_PepPep" labelCaption="PEP" class="ReadonlyAttribute" /></cell></row><row><cell cellClass="DataContentCell"><data attribute="TC_Pepdes" labelCaption="Pep" class="ReadonlyAttribute" /></cell></row><row><cell cellClass="DataContentCell"><data attribute="TC_SucursalPagId" labelCaption="Id.Sociedad" class="ReadonlyAttribute" /></cell></row><row><cell cellClass="DataContentCell"><data attribute="TC_SucursalPagDes" labelCaption="Sociedad Pagadora" class="ReadonlyAttribute" /></cell></row><row><cell cellClass="DataContentCell"><data attribute="TE_pedDetCompSim" labelCaption="TE_ped Det Comp Sim" class="ReadonlyAttribute" /></cell></row><row><cell cellClass="DataContentCell"><data attribute="TC_PuestosFalta" labelCaption="Falta" class="ReadonlyAttribute" /></cell></row><row><cell cellClass="DataContentCell"><data attribute="TC_PuestosRetardo" labelCaption="Retardo" class="ReadonlyAttribute" /></cell></row><row><cell cellClass="DataContentCell"><data attribute="TC_Puestosmatri" labelCaption="Matricial" class="ReadonlyAttribute" /></cell></row><row><cell cellClass="DataContentCell"><data attribute="TE_PeddetBloqueNum" labelCaption="TE_Peddet Bloque Num" class="ReadonlyAttribute" /></cell></row><row><cell cellClass="DataContentCell"><data attribute="TC_FaseEventoID" labelCaption="Fase" class="ReadonlyAttribute" /></cell></row><row><cell cellClass="DataContentCell"><data attribute="TC_FaseEventoDEs" labelCaption="Descripción Fase" class="ReadonlyAttribute" /></cell></row><row><cell cellClass="DataContentCell"><data attribute="TE_PeddetFechacitaJunta" labelCaption="Cíta" class="ReadonlyAttribute" /></cell></row><row><cell cellClass="DataContentCell"><data attribute="TE_PeddetFechacitaFin" labelCaption="Fecha final cita" class="ReadonlyAttribute" /></cell></row><row><cell cellClass="DataContentCell"><data attribute="TE_PeddetFechafincitaoculta" labelCaption="Final" class="ReadonlyAttribute" /></cell></row><row><cell cellClass="DataContentCell"><data attribute="TC_PuestosHrasAntesCanPed" labelCaption="H.antes Can. Conf." class="ReadonlyAttribute" /></cell></row><row><cell cellClass="DataContentCell"><data attribute="TE_PedidoDuracionDias" labelCaption="Duración del evento(Días de show)" class="ReadonlyAttribute" /></cell></row><row><cell cellClass="DataContentCell"><data attribute="TC_complejoid" labelCaption="Tipo de complejidad" class="ReadonlyAttribute" /></cell></row><row><cell cellClass="DataContentCell"><data attribute="ST_UnidadNegPedId" labelCaption="Unidad de negocio" class="ReadonlyAttribute" /></cell></row><row><cell cellClass="DataContentCell"><data attribute="ST_UnidadNegPedDes" labelCaption="Unidad de negocio" class="ReadonlyAttribute" /></cell></row><row><cell cellClass="DataContentCell"><data attribute="TC_UnidadNegID" labelCaption="Id Und.Neg." class="ReadonlyAttribute" /></cell></row><row><cell cellClass="DataContentCell"><data attribute="TC_UnidadNegDes" labelCaption="Unidad de negocio" class="ReadonlyAttribute" /></cell></row><row><cell cellClass="DataContentCell"><data attribute="TC_SociedadesPagadorasID" labelCaption="ID Soc.pag." class="ReadonlyAttribute" /></cell></row><row><cell cellClass="DataContentCell"><data attribute="TC_SociedadesPagadorasDes" labelCaption="Sociedad pagadora" class="ReadonlyAttribute" /></cell></row><row><cell cellClass="DataContentCell"><data attribute="TC_SociedadID" labelCaption="TC_Sociedad ID" class="ReadonlyAttribute" /></cell></row><row><cell cellClass="DataContentCell"><data attribute="TC_SociedadDes" labelCaption="Sociedad" class="ReadonlyAttribute" /></cell></row><row><cell cellClass="DataContentCell"><data attribute="TE_PeddetProductoTitulo" labelCaption="TE_Peddet Producto Titulo" class="ReadonlyAttribute" /></cell></row><row><cell cellClass="DataContentCell"><data attribute="TE_ReservacionIdPedido" labelCaption="TE_Reservacion Id Pedido" class="ReadonlyAttribute" /></cell></row><row><cell cellClass="DataContentCell"><data attribute="TE_ReservacionStatus" labelCaption="Estatus" class="ReadonlyAttribute" /></cell></row><row><cell cellClass="DataContentCell"><data attribute="TE_ReservacionCitaInicio" labelCaption="TE_Reservacion Cita Inicio" class="ReadonlyAttribute" /></cell></row><row><cell cellClass="DataContentCell"><data attribute="TE_ReservacionCitaFin" labelCaption="TE_Reservacion Cita Fin" class="ReadonlyAttribute" /></cell></row><row><cell cellClass="DataContentCell"><data attribute="TE_ReservacionTipo" labelCaption="Tipo" class="ReadonlyAttribute" /></cell></row><row><cell cellClass="DataContentCell"><data attribute="TE_ReservacionHoraEntradaAsistencia" labelCaption="Entrada Asistencia" class="ReadonlyAttribute" /></cell></row><row><cell cellClass="DataContentCell"><data attribute="TE_ReservacionHoraSalidaAsistencia" labelCaption="Salida Asistencia" class="ReadonlyAttribute" /></cell></row><row><cell cellClass="DataContentCell"><data attribute="TE_ReservacionEstadoAsistencia" labelCaption="TE_Reservacion Estado Asistencia" class="ReadonlyAttribute" /></cell></row><row><cell cellClass="DataContentCell"><data attribute="TE_ReservacionMedioAsistencia" labelCaption="TE_Reservacion Medio Asistencia" class="ReadonlyAttribute" /></cell></row><row><cell cellClass="DataContentCell"><data attribute="TE_ReservacionPagoPorTurno" labelCaption="TE_Reservacion Pago Por Turno" class="ReadonlyAttribute" /></cell></row><row><cell cellClass="DataContentCell"><data attribute="TE_ReservacionPagoProgramado" labelCaption="TE_Reservacion Pago Programado" class="ReadonlyAttribute" /></cell></row><row><cell cellClass="DataContentCell"><data attribute="TE_ReservacionPagoReal" labelCaption="TE_Reservacion Pago Real" class="ReadonlyAttribute" /></cell></row><row><cell cellClass="DataContentCell"><data attribute="TE_ReservacionPeriodoAsistencia" labelCaption="Periodo Asistencia" class="ReadonlyAttribute" /></cell></row><row><cell cellClass="DataContentCell"><data attribute="TE_ReservPeriodoCobrado" labelCaption="TE_Reserv Periodo Cobrado" class="ReadonlyAttribute" /></cell></row><row><cell cellClass="DataContentCell"><data attribute="TE_ReservacionAnioCobrado" labelCaption="TE_Reservacion Anio Cobrado" class="ReadonlyAttribute" /></cell></row><row><cell cellClass="DataContentCell"><data attribute="TE_ReservacionDuracionEnTurnos" labelCaption="TE_Reservacion Duracion En Turnos" class="ReadonlyAttribute" /></cell></row><row><cell cellClass="DataContentCell"><data attribute="TE_ReservacionIdProductoEvento" labelCaption="TE_Reservacion Id Producto Evento" class="ReadonlyAttribute" /></cell></row><row><cell cellClass="DataContentCell"><data attribute="TE_ReservacionIdPuestoEvento" labelCaption="TE_Reservacion Id Puesto Evento" class="ReadonlyAttribute" /></cell></row><row><cell cellClass="DataContentCell"><data attribute="TE_ReservacionFormaDePago" labelCaption="TE_Reservacion Forma De Pago" class="ReadonlyAttribute" /></cell></row><row><cell cellClass="DataContentCell"><data attribute="TE_ReservacionBloque" labelCaption="TE_Reservacion Bloque" class="ReadonlyAttribute" /></cell></row><row><cell cellClass="DataContentCell"><data attribute="TE_ReservacionSeriado" labelCaption="TE_Reservacion Seriado" class="ReadonlyAttribute" /></cell></row><row><cell cellClass="DataContentCell"><data attribute="TE_ReservacionUnidadDeNegocio" labelCaption="TE_Reservacion Unidad De Negocio" class="ReadonlyAttribute" /></cell></row><row><cell cellClass="DataContentCell"><data attribute="TE_ReservacionSociedad" labelCaption="TE_Reservacion Sociedad" class="ReadonlyAttribute" /></cell></row><row><cell cellClass="DataContentCell"><data attribute="TE_ReservacionObservaciones" labelCaption="TE_Reservacion Observaciones" class="ReadonlyAttribute" /></cell></row><row><cell cellClass="DataContentCell"><data attribute="TE_ReservacionIP" labelCaption="TE_Reservacion IP" class="ReadonlyAttribute" /></cell></row><row><cell cellClass="DataContentCell"><data attribute="TE_ReservIacionTimescanEntrada" labelCaption="TE_Reserv Iacion Timescan Entrada" class="ReadonlyAttribute" /></cell></row><row><cell cellClass="DataContentCell"><data attribute="TE_ReservacionIdTimescanSalida" labelCaption="TE_Reservacion Id Timescan Salida" class="ReadonlyAttribute" /></cell></row><row><cell cellClass="DataContentCell"><data attribute="TE_ReservacionEstacionEntrada" labelCaption="TE_Reservacion Estacion Entrada" class="ReadonlyAttribute" /></cell></row><row><cell cellClass="DataContentCell"><data attribute="TE_ReservacionEstacionSalida" labelCaption="TE_Reservacion Estacion Salida" class="ReadonlyAttribute" /></cell></row><row><cell cellClass="DataContentCell"><data attribute="TE_ReservacionPenalizacionSueldo" labelCaption="Penalizacion Sueldo" class="ReadonlyAttribute" /></cell></row><row><cell cellClass="DataContentCell"><data attribute="TE_ReservacionPenalizacionDias" labelCaption="TE_Reservacion Penalizacion Dias" class="ReadonlyAttribute" /></cell></row><row><cell cellClass="DataContentCell"><data attribute="TE_ReservacionReglaAplicada" labelCaption="TE_Reservacion Regla Aplicada" class="ReadonlyAttribute" /></cell></row><row><cell cellClass="DataContentCell"><data attribute="TE_ReservacionTipoRegistroTimeScan" labelCaption="Time Scan" class="ReadonlyAttribute" /></cell></row><row><cell cellClass="DataContentCell"><data attribute="TE_ReservacionCreado" labelCaption="TE_Reservacion Creado" class="ReadonlyAttribute" /></cell></row><row><cell cellClass="DataContentCell"><data attribute="TE_ReservacionCreadoPor" labelCaption="TE_Reservacion Creado Por" class="ReadonlyAttribute" /></cell></row><row><cell cellClass="DataContentCell"><data attribute="TE_ReservacionModificado" labelCaption="TE_Reservacion Modificado" class="ReadonlyAttribute" /></cell></row><row><cell cellClass="DataContentCell"><data attribute="TE_ReservacionModificadoPor" labelCaption="TE_Reservacion Modificado Por" class="ReadonlyAttribute" /></cell></row><row><cell cellClass="DataContentCell"><data attribute="TE_ReservacionFolioHonorarios" labelCaption="TE_Reservacion Folio Honorarios" class="ReadonlyAttribute" /></cell></row><row><cell cellClass="DataContentCell"><data attribute="TE_ReservacionIdReservacion_Lobo" labelCaption="Id Reservacion_Lobo" class="ReadonlyAttribute" /></cell></row><row><cell cellClass="DataContentCell"><data attribute="TE_ReservacionEnvioCorreoEmpalmes" labelCaption="Correo Empalmes" class="ReadonlyAttribute" /></cell></row><row><cell cellClass="DataContentCell"><data attribute="TE_ReservaciontpIdPlaza" labelCaption="TE_Reservaciontp Id Plaza" class="ReadonlyAttribute" /></cell></row><row><cell cellClass="DataContentCell"><data attribute="TE_ReservacionSaldoVencido" labelCaption="TE_Reservacion Saldo Vencido" class="ReadonlyAttribute" /></cell></row><row><cell cellClass="DataContentCell"><data attribute="TE_ReservacionIdPagoHonorario" labelCaption="TE_Reservacion Id Pago Honorario" class="ReadonlyAttribute" /></cell></row><row><cell cellClass="DataContentCell"><data attribute="TE_ReservacionIdPagoHonorario_Lista" labelCaption="Pago Honorario_Lista" class="ReadonlyAttribute" /></cell></row><row><cell cellClass="DataContentCell"><data attribute="TE_ReservacionSinPlazaParaPago" labelCaption="TE_Reservacion Sin Plaza Para Pago" class="ReadonlyAttribute" /></cell></row><row><cell cellClass="DataContentCell"><data attribute="TE_ReservacionCampo0" labelCaption="TE_Reservacion Campo0" class="ReadonlyAttribute" /></cell></row><row><cell cellClass="DataContentCell"><data attribute="TE_ReservacionBorrar" labelCaption="Borrar" class="ReadonlyAttribute" /></cell></row><row><cell cellClass="DataContentCell"><data attribute="TE_ReservacionHoraReservacion" labelCaption="Hora REservacion" class="ReadonlyAttribute" /></cell></row><row><cell cellClass="DataContentCell"><data attribute="TE_ReservacionEstatusPago" labelCaption="Pago" class="ReadonlyAttribute" /></cell></row></table></cell></row><row><cell><actiongroup controlName="ActionGroup_Actions" /></cell></row></table></cell></row></table><actionGroups><actionGroup controlName="ActionGroup_Actions" class="TrnActionGroup"><item><action controlName="BtnUpdate" onClickEvent="'DoUpdate'" caption="GXM_update" class="Button" PATTERN_ELEMENT_CUSTOM_PROPERTIES="&lt;Properties&gt;&lt;Property&gt;&lt;Name&gt;title&lt;/Name&gt;&lt;Value&gt;GXM_update&lt;/Value&gt;&lt;/Property&gt;&lt;/Properties&gt;" /></item><item><action controlName="BtnDelete" onClickEvent="'DoDelete'" caption="GX_BtnDelete" class="BtnDefault" PATTERN_ELEMENT_CUSTOM_PROPERTIES="&lt;Properties&gt;&lt;Property&gt;&lt;Name&gt;title&lt;/Name&gt;&lt;Value&gt;GX_BtnDelete&lt;/Value&gt;&lt;/Property&gt;&lt;/Properties&gt;" /></item></actionGroup></actionGroups></layout></detail></Form></GxMultiForm>
+
+/* Generated by DVelop Work With Plus Pattern [Start] - Do not change */
+
+parm(in:TE_ReservacionID);
+
+	/* Generated by DVelop Work With Plus Pattern [End] - Do not change */
+
+Event Start
+
+	/* Generated by DVelop Work With Plus Pattern [Start] - Do not change */
+
+	LoadWWPContext.Call(&WWPContext)
+
+	
+	Do 'PrepareTransaction'
+
+	/* Generated by DVelop Work With Plus Pattern [End] - Do not change */
+
+EndEvent
+
+Event Load
+
+	/* Generated by DVelop Work With Plus Pattern [Start] - Do not change */
+
+	&TempBoolean = SecGAMIsAuthByFunctionalityKey.Udp(!'tc_pepview_Execute')
+	If (&TempBoolean)
+		TC_Pepdes.Link = TC_PepView.Link(TC_PepId, '')
+	Endif
+
+	// Security check for 'Actions'
+	&TempBoolean = SecGAMIsAuthByFunctionalityKey.Udp(!'te_reservacion_Update')
+	If not (&TempBoolean)
+		BtnUpdate.Visible = False
+	Endif
+	&TempBoolean = SecGAMIsAuthByFunctionalityKey.Udp(!'te_reservacion_Delete')
+	If not (&TempBoolean)
+		BtnDelete.Visible = False
+	Endif
+
+	/* Generated by DVelop Work With Plus Pattern [End] - Do not change */
+
+EndEvent
+
+Event 'DoUpdate'
+
+	/* Generated by DVelop Work With Plus Pattern [Start] - Do not change */
+
+	TE_Reservacion.Call(TrnMode.Update, TE_ReservacionID)
+
+	/* Generated by DVelop Work With Plus Pattern [End] - Do not change */
+
+EndEvent
+
+Event 'DoDelete'
+
+	/* Generated by DVelop Work With Plus Pattern [Start] - Do not change */
+
+	TE_Reservacion.Call(TrnMode.Delete, TE_ReservacionID)
+
+	/* Generated by DVelop Work With Plus Pattern [End] - Do not change */
+
+EndEvent
+
+Sub 'PrepareTransaction'
+
+	/* Generated by DVelop Work With Plus Pattern [Start] - Do not change */
+
+	&TrnContext = new()
+	&TrnContext.CallerObject = &Pgmname
+	&TrnContext.CallerOnDelete = False
+	&TrnContext.CallerURL = &HTTPRequest.ScriptName + !"?" + &HTTPRequest.QueryString
+	&TrnContext.TransactionName = !"TE_Reservacion"
+
+	&TrnContextAtt = new()
+	&TrnContextAtt.AttributeName = !"TE_ReservacionID"
+	&TrnContextAtt.AttributeValue = &TE_ReservacionID.ToString()
+	&TrnContext.Attributes.Add(&TrnContextAtt)
+
+	&Session.Set(!"TrnContext", &TrnContext.ToXml())
+
+	/* Generated by DVelop Work With Plus Pattern [End] - Do not change */
+
+EndSub
+
+
+======================================================================
+TC_MovPedidos
+======================================================================
+<GxMultiForm rootId="1" version="html:15.0.0;layout:15.0.16"><Form id="1" type="layout"><detail><layout><table controlName="LayoutMainTable" tableType="Responsive" responsiveSizes="[]"><row><cell><table controlName="TableMain" class="TableMainTransaction" tableType="Responsive" responsiveSizes="[]"><row><cell><errorviewer controlName="ErrorViewer" class="ErrorViewer" /></cell></row><row><cell><table controlName="TableContent" class="TableContent" tableType="Responsive" responsiveSizes="[{&quot;scale&quot;:&quot;sm&quot;,&quot;rows&quot;:[[{&quot;width&quot;:75}]]},{&quot;scale&quot;:&quot;lg&quot;,&quot;rows&quot;:[[{&quot;width&quot;:50}]]}]"><row><cell><html controlName="Html_DVPanel_TableAttributes" formId="2" /></cell></row></table></cell></row><row><cell><actiongroup controlName="ActionGroup_Actions" /></cell></row></table></cell></row></table><actionGroups><actionGroup controlName="ActionGroup_Actions" class="TrnActionGroup"><item><action controlName="BtnTrn_Enter" onClickEvent="Enter" caption="GX_BtnEnter" class="Button" PATTERN_ELEMENT_CUSTOM_PROPERTIES="&lt;Properties&gt;&lt;Property&gt;&lt;Name&gt;title&lt;/Name&gt;&lt;Value&gt;GX_BtnEnter&lt;/Value&gt;&lt;/Property&gt;&lt;/Properties&gt;" /></item><item><action controlName="BtnTrn_Cancel" onClickEvent="Cancel" caption="GX_BtnCancel" class="BtnDefault" PATTERN_ELEMENT_CUSTOM_PROPERTIES="&lt;Properties&gt;&lt;Property&gt;&lt;Name&gt;title&lt;/Name&gt;&lt;Value&gt;GX_BtnCancel&lt;/Value&gt;&lt;/Property&gt;&lt;/Properties&gt;" /></item><item><action controlName="BtnTrn_Delete" onClickEvent="Delete" caption="GX_BtnDelete" class="BtnDefault" PATTERN_ELEMENT_CUSTOM_PROPERTIES="&lt;Properties&gt;&lt;Property&gt;&lt;Name&gt;title&lt;/Name&gt;&lt;Value&gt;GX_BtnDelete&lt;/Value&gt;&lt;/Property&gt;&lt;/Properties&gt;" /></item></actionGroup></actionGroups></layout></detail></Form><Form id="2" type="html"><BODY><gxDVelop.GXBootstrap.Panel ControlName="DVPanel_TableAttributes" AutoWidth="False" AutoHeight="True" Cls="PanelFilled_BaseColor" AutoScroll="False" Title="WWP_TemplateDataPanelTitle" Collapsible="False" Collapsed="False" ShowCollapseIcon="False" Width="100%" IconPosition="Left"><container containerId="Body"><gxLayout formId="3" ControlName="Layout_TableAttributes" /></container></gxDVelop.GXBootstrap.Panel></BODY></Form><Form id="3" type="layout"><detail><layout><table controlName="TableAttributes" class="TableData" tableType="Responsive" responsiveSizes="[]"><row><cell cellClass="DataContentCell"><data attribute="TC_MovPedidosID" labelCaption="Tipo de movimiento" class="Attribute" PATTERN_ELEMENT_CUSTOM_PROPERTIES="&lt;Properties&gt;&lt;Property&gt;&lt;Name&gt;ControlType&lt;/Name&gt;&lt;Value&gt;Edit&lt;/Value&gt;&lt;/Property&gt;&lt;Property&gt;&lt;Name&gt;InputType&lt;/Name&gt;&lt;Value&gt;Values&lt;/Value&gt;&lt;/Property&gt;&lt;/Properties&gt;" /></cell></row><row><cell cellClass="DataContentCell"><data attribute="TC_MovPedidosDes" labelCaption="Descripción movimiento" class="Attribute" /></cell></row></table></layout></detail></Form></GxMultiForm>
+
+/* Generated by DVelop Work With Plus Pattern [Start] - Do not change */
+parm(in:&Mode, in:&TC_MovPedidosID);
+
+TC_MovPedidosID = &TC_MovPedidosID if not &TC_MovPedidosID.IsEmpty();
+noaccept(TC_MovPedidosID) if not &TC_MovPedidosID.IsEmpty();
+noprompt(TC_MovPedidosID);
+
+/* Generated by DVelop Work With Plus Pattern [End] - Do not change */
+
+Event Start
+
+	/* Generated by DVelop Work With Plus Pattern [Start] - Do not change */
+
+	LoadWWPContext.Call(&WWPContext)
+
+	
+	&TrnContext.FromXml(&WebSession.Get(!"TrnContext"))
+
+	/* Generated by DVelop Work With Plus Pattern [End] - Do not change */
+
+EndEvent
+
+Event After Trn
+
+	/* Generated by DVelop Work With Plus Pattern [Start] - Do not change */
+
+	If (&Mode = TrnMode.Delete and not &TrnContext.CallerOnDelete)
+		TC_MovPedidosWW.Call()
+	Endif
+
+	Return
+
+	/* Generated by DVelop Work With Plus Pattern [End] - Do not change */
+
+EndEvent
+
+
+======================================================================
+TC_MovPedidosGeneral
+======================================================================
+<GxMultiForm rootId="1" version="html:15.0.0;layout:15.0.16"><Form id="1" type="layout"><detail><layout><table controlName="LayoutMainTable" tableType="Responsive" responsiveSizes="[]"><row><cell><table controlName="Table" class="" tableType="Responsive" responsiveSizes="[]"><row><cell><table controlName="TransactionDetail_TableAttributes" class="TableData" tableType="Responsive" responsiveSizes="[]"><row><cell cellClass="DataContentCell"><data attribute="TC_MovPedidosID" labelCaption="Tipo de movimiento" class="ReadonlyAttribute" /></cell></row><row><cell cellClass="DataContentCell"><data attribute="TC_MovPedidosDes" labelCaption="Descripción movimiento" class="ReadonlyAttribute" /></cell></row></table></cell></row><row><cell><actiongroup controlName="ActionGroup_Actions" /></cell></row></table></cell></row></table><actionGroups><actionGroup controlName="ActionGroup_Actions" class="TrnActionGroup"><item><action controlName="BtnUpdate" onClickEvent="'DoUpdate'" caption="GXM_update" class="Button" PATTERN_ELEMENT_CUSTOM_PROPERTIES="&lt;Properties&gt;&lt;Property&gt;&lt;Name&gt;title&lt;/Name&gt;&lt;Value&gt;GXM_update&lt;/Value&gt;&lt;/Property&gt;&lt;/Properties&gt;" /></item><item><action controlName="BtnDelete" onClickEvent="'DoDelete'" caption="GX_BtnDelete" class="BtnDefault" PATTERN_ELEMENT_CUSTOM_PROPERTIES="&lt;Properties&gt;&lt;Property&gt;&lt;Name&gt;title&lt;/Name&gt;&lt;Value&gt;GX_BtnDelete&lt;/Value&gt;&lt;/Property&gt;&lt;/Properties&gt;" /></item></actionGroup></actionGroups></layout></detail></Form></GxMultiForm>
+
+/* Generated by DVelop Work With Plus Pattern [Start] - Do not change */
+
+parm(in:TC_MovPedidosID);
+
+	/* Generated by DVelop Work With Plus Pattern [End] - Do not change */
+
+Event Start
+
+	/* Generated by DVelop Work With Plus Pattern [Start] - Do not change */
+
+	LoadWWPContext.Call(&WWPContext)
+
+	
+	Do 'PrepareTransaction'
+
+	/* Generated by DVelop Work With Plus Pattern [End] - Do not change */
+
+EndEvent
+
+Event Load
+
+	/* Generated by DVelop Work With Plus Pattern [Start] - Do not change */
+
+	// Security check for 'Actions'
+	&TempBoolean = SecGAMIsAuthByFunctionalityKey.Udp(!'tc_movpedidos_Update')
+	If not (&TempBoolean)
+		BtnUpdate.Visible = False
+	Endif
+	&TempBoolean = SecGAMIsAuthByFunctionalityKey.Udp(!'tc_movpedidos_Delete')
+	If not (&TempBoolean)
+		BtnDelete.Visible = False
+	Endif
+
+	/* Generated by DVelop Work With Plus Pattern [End] - Do not change */
+
+EndEvent
+
+Event 'DoUpdate'
+
+	/* Generated by DVelop Work With Plus Pattern [Start] - Do not change */
+
+	TC_MovPedidos.Call(TrnMode.Update, TC_MovPedidosID)
+
+	/* Generated by DVelop Work With Plus Pattern [End] - Do not change */
+
+EndEvent
+
+Event 'DoDelete'
+
+	/* Generated by DVelop Work With Plus Pattern [Start] - Do not change */
+
+	TC_MovPedidos.Call(TrnMode.Delete, TC_MovPedidosID)
+
+	/* Generated by DVelop Work With Plus Pattern [End] - Do not change */
+
+EndEvent
+
+Sub 'PrepareTransaction'
+
+	/* Generated by DVelop Work With Plus Pattern [Start] - Do not change */
+
+	&TrnContext = new()
+	&TrnContext.CallerObject = &Pgmname
+	&TrnContext.CallerOnDelete = False
+	&TrnContext.CallerURL = &HTTPRequest.ScriptName + !"?" + &HTTPRequest.QueryString
+	&TrnContext.TransactionName = !"TC_MovPedidos"
+
+	&TrnContextAtt = new()
+	&TrnContextAtt.AttributeName = !"TC_MovPedidosID"
+	&TrnContextAtt.AttributeValue = &TC_MovPedidosID.ToString()
+	&TrnContext.Attributes.Add(&TrnContextAtt)
+
+	&Session.Set(!"TrnContext", &TrnContext.ToXml())
+
+	/* Generated by DVelop Work With Plus Pattern [End] - Do not change */
+
+EndSub
+
+
+======================================================================
+TL_Movempleados
+======================================================================
+<GxMultiForm rootId="1" version="html:15.0.0;layout:15.0.16"><Form id="1" type="layout"><detail><layout><table controlName="LayoutMainTable" tableType="Responsive" responsiveSizes="[]"><row><cell><table controlName="TableMain" class="TableMainTransaction" tableType="Responsive" responsiveSizes="[]"><row><cell><errorviewer controlName="ErrorViewer" class="ErrorViewer" /></cell></row><row><cell><table controlName="TableContent" class="TableContent" tableType="Responsive" responsiveSizes="[{&quot;scale&quot;:&quot;sm&quot;,&quot;rows&quot;:[[{&quot;width&quot;:75}]]},{&quot;scale&quot;:&quot;md&quot;,&quot;rows&quot;:[[{&quot;width&quot;:100}]]},{&quot;scale&quot;:&quot;lg&quot;,&quot;rows&quot;:[[{&quot;width&quot;:100}]]}]"><row><cell><html controlName="Html_DVPanel_TableAttributes" formId="2" /></cell></row></table></cell></row><row><cell><actiongroup controlName="ActionGroup_Actions" /></cell></row></table></cell></row><row><cell><html controlName="Html_BottomAuxiliarControls" formId="4" /></cell></row></table><actionGroups><actionGroup controlName="ActionGroup_Actions" class="TrnActionGroup"><item><action controlName="BtnTrn_Enter" onClickEvent="Enter" caption="GX_BtnEnter" class="Button" PATTERN_ELEMENT_CUSTOM_PROPERTIES="&lt;Properties&gt;&lt;Property&gt;&lt;Name&gt;title&lt;/Name&gt;&lt;Value&gt;GX_BtnEnter&lt;/Value&gt;&lt;/Property&gt;&lt;/Properties&gt;" /></item><item><action controlName="BtnTrn_Cancel" onClickEvent="Cancel" caption="GX_BtnCancel" class="BtnDefault" PATTERN_ELEMENT_CUSTOM_PROPERTIES="&lt;Properties&gt;&lt;Property&gt;&lt;Name&gt;title&lt;/Name&gt;&lt;Value&gt;GX_BtnCancel&lt;/Value&gt;&lt;/Property&gt;&lt;/Properties&gt;" /></item><item><action controlName="BtnTrn_Delete" onClickEvent="Delete" caption="GX_BtnDelete" class="BtnDefault" PATTERN_ELEMENT_CUSTOM_PROPERTIES="&lt;Properties&gt;&lt;Property&gt;&lt;Name&gt;title&lt;/Name&gt;&lt;Value&gt;GX_BtnDelete&lt;/Value&gt;&lt;/Property&gt;&lt;/Properties&gt;" /></item></actionGroup></actionGroups></layout></detail></Form><Form id="2" type="html"><BODY><gxDVelop.GXBootstrap.Panel ControlName="DVPanel_TableAttributes" AutoWidth="False" AutoHeight="True" Cls="PanelFilled_BaseColor" AutoScroll="False" Title="WWP_TemplateDataPanelTitle" Collapsible="False" Collapsed="False" ShowCollapseIcon="False" Width="100%" IconPosition="Left"><container containerId="Body"><gxLayout formId="3" ControlName="Layout_TableAttributes" /></container></gxDVelop.GXBootstrap.Panel></BODY></Form><Form id="3" type="layout"><detail><layout><table controlName="TableAttributes" class="TableData" tableType="Responsive" responsiveSizes="[]"><row><cell cellClass="DataContentCell"><data attribute="TL_MovempleadosFecha" labelCaption="Fecha movimiento" class="AttributeDateTime" /></cell><cell cellClass="DataContentCell"><data attribute="TL_MovempleadosTotalProceso" labelCaption="Total proceso" class="Attribute" /></cell></row><row><cell cellClass="DataContentCell"><data attribute="TL_MovempleadosTotalProcesados" labelCaption="Total procesados" class="Attribute" /></cell><cell cellClass="DataContentCell"><data attribute="TL_MovempleadosEstatus" labelCaption="Estatus" class="AttributeCheckBox" /></cell></row><row><cell cellClass="DataContentCell"><table controlName="UnnamedTableTL_MovempleadosUsuario" tableType="Responsive" responsiveSizes="[{&quot;scale&quot;:&quot;sm&quot;,&quot;rows&quot;:[[{&quot;width&quot;:8},{&quot;width&quot;:92}]]}]"><row><cell cellClass="MergeLabelCell"><textblock controlName="TextBlockTL_MovempleadosUsuario" caption="Usuario" class="Label" /></cell><cell><data attribute="TL_MovempleadosUsuario" labelPosition="None" class="Attribute" /></cell></row></table></cell></row></table></layout></detail></Form><Form id="4" type="html"><BODY><gxAttribute ControlType="Edit" InputType="Values" AttID="TL_MovempleadosId" /></BODY></Form></GxMultiForm>
+
+/* Generated by DVelop Work With Plus Pattern [Start] - Do not change */
+[web]
+{
+parm(in:&Mode, in:&TL_MovempleadosId);
+
+NoAccept(TL_MovempleadosTotalProceso);
+NoAccept(TL_MovempleadosTotalProcesados);
+NoAccept(TL_MovempleadosUsuario);
+TL_MovempleadosId = &TL_MovempleadosId if not &TL_MovempleadosId.IsEmpty();
+noaccept(TL_MovempleadosId);
+noprompt(TL_MovempleadosId);
+
+}
+
+/* Generated by DVelop Work With Plus Pattern [End] - Do not change */
+
+Event Start
+
+	/* Generated by DVelop Work With Plus Pattern [Start] - Do not change */
+
+	LoadWWPContext.Call(&WWPContext)
+
+	
+	&TrnContext.FromXml(&WebSession.Get(!"TrnContext"))
+	
+    [web]
+    {
+	TL_MovempleadosId.Visible = False
+	}
+
+	/* Generated by DVelop Work With Plus Pattern [End] - Do not change */
+
+EndEvent
+
+Event After Trn
+
+	/* Generated by DVelop Work With Plus Pattern [Start] - Do not change */
+
+   [web]
+   {
+	
+	If (&Mode = TrnMode.Delete and not &TrnContext.CallerOnDelete)
+		TL_MovempleadosWW.Call()
+	Endif
+
+	Return
+   }
+
+	/* Generated by DVelop Work With Plus Pattern [End] - Do not change */
+
+EndEvent
+
+
+======================================================================
+TL_MovempleadosGeneral
+======================================================================
+<GxMultiForm rootId="1" version="html:15.0.0;layout:15.0.16"><Form id="1" type="layout"><detail><layout><table controlName="LayoutMainTable" tableType="Responsive" responsiveSizes="[]"><row><cell><table controlName="Table" class="" tableType="Responsive" responsiveSizes="[{&quot;scale&quot;:&quot;sm&quot;,&quot;rows&quot;:[[{&quot;width&quot;:75}]]},{&quot;scale&quot;:&quot;md&quot;,&quot;rows&quot;:[[{&quot;width&quot;:100}]]},{&quot;scale&quot;:&quot;lg&quot;,&quot;rows&quot;:[[{&quot;width&quot;:100}]]}]"><row><cell><table controlName="TransactionDetail_TableAttributes" class="TableData" tableType="Responsive" responsiveSizes="[]"><row><cell cellClass="DataContentCell"><data attribute="TL_MovempleadosFecha" labelCaption="Fecha movimiento" class="ReadonlyAttribute" /></cell><cell cellClass="DataContentCell"><data attribute="TL_MovempleadosTotalProceso" labelCaption="Total proceso" class="ReadonlyAttribute" /></cell></row><row><cell cellClass="DataContentCell"><data attribute="TL_MovempleadosTotalProcesados" labelCaption="Total procesados" class="ReadonlyAttribute" /></cell><cell cellClass="DataContentCell"><data attribute="TL_MovempleadosEstatus" labelCaption="Estatus" class="ReadonlyAttribute" /></cell></row><row><cell cellClass="DataContentCell"><table controlName="UnnamedTableTL_MovempleadosUsuario" tableType="Responsive" responsiveSizes="[{&quot;scale&quot;:&quot;sm&quot;,&quot;rows&quot;:[[{&quot;width&quot;:8},{&quot;width&quot;:92}]]}]"><row><cell cellClass="MergeLabelCell"><textblock controlName="TextBlockTL_MovempleadosUsuario" caption="Usuario" class="Label" /></cell><cell><data attribute="TL_MovempleadosUsuario" labelPosition="None" class="ReadonlyAttribute" /></cell></row></table></cell></row></table></cell></row><row><cell><actiongroup controlName="ActionGroup_Actions" /></cell></row></table></cell></row><row><cell><html controlName="Html_BottomAuxiliarControls" formId="2" /></cell></row></table><actionGroups><actionGroup controlName="ActionGroup_Actions" class="TrnActionGroup"><item><action controlName="BtnUpdate" onClickEvent="'DoUpdate'" caption="GXM_update" class="Button" PATTERN_ELEMENT_CUSTOM_PROPERTIES="&lt;Properties&gt;&lt;Property&gt;&lt;Name&gt;title&lt;/Name&gt;&lt;Value&gt;GXM_update&lt;/Value&gt;&lt;/Property&gt;&lt;/Properties&gt;" /></item><item><action controlName="BtnDelete" onClickEvent="'DoDelete'" caption="GX_BtnDelete" class="BtnDefault" PATTERN_ELEMENT_CUSTOM_PROPERTIES="&lt;Properties&gt;&lt;Property&gt;&lt;Name&gt;title&lt;/Name&gt;&lt;Value&gt;GX_BtnDelete&lt;/Value&gt;&lt;/Property&gt;&lt;/Properties&gt;" /></item></actionGroup></actionGroups></layout></detail></Form><Form id="2" type="html"><BODY><gxAttribute ControlType="Edit" InputType="Values" AttID="TL_MovempleadosId" /></BODY></Form></GxMultiForm>
+
+/* Generated by DVelop Work With Plus Pattern [Start] - Do not change */
+
+parm(in:TL_MovempleadosId);
+
+	/* Generated by DVelop Work With Plus Pattern [End] - Do not change */
+
+Event Start
+
+	/* Generated by DVelop Work With Plus Pattern [Start] - Do not change */
+
+	LoadWWPContext.Call(&WWPContext)
+
+	
+	Do 'PrepareTransaction'
+
+	/* Generated by DVelop Work With Plus Pattern [End] - Do not change */
+
+EndEvent
+
+Event Load
+
+	/* Generated by DVelop Work With Plus Pattern [Start] - Do not change */
+
+	TL_MovempleadosId.Visible = False
+
+	// Security check for 'Actions'
+	&TempBoolean = SecGAMIsAuthByFunctionalityKey.Udp(!'tl_movempleados_Update')
+	If not (&TempBoolean)
+		BtnUpdate.Visible = False
+	Endif
+	&TempBoolean = SecGAMIsAuthByFunctionalityKey.Udp(!'tl_movempleados_Delete')
+	If not (&TempBoolean)
+		BtnDelete.Visible = False
+	Endif
+
+	/* Generated by DVelop Work With Plus Pattern [End] - Do not change */
+
+EndEvent
+
+Event 'DoUpdate'
+
+	/* Generated by DVelop Work With Plus Pattern [Start] - Do not change */
+
+	TL_Movempleados.Call(TrnMode.Update, TL_MovempleadosId)
+
+	/* Generated by DVelop Work With Plus Pattern [End] - Do not change */
+
+EndEvent
+
+Event 'DoDelete'
+
+	/* Generated by DVelop Work With Plus Pattern [Start] - Do not change */
+
+	TL_Movempleados.Call(TrnMode.Delete, TL_MovempleadosId)
+
+	/* Generated by DVelop Work With Plus Pattern [End] - Do not change */
+
+EndEvent
+
+Sub 'PrepareTransaction'
+
+	/* Generated by DVelop Work With Plus Pattern [Start] - Do not change */
+
+	&TrnContext = new()
+	&TrnContext.CallerObject = &Pgmname
+	&TrnContext.CallerOnDelete = False
+	&TrnContext.CallerURL = &HTTPRequest.ScriptName + !"?" + &HTTPRequest.QueryString
+	&TrnContext.TransactionName = !"TL_Movempleados"
+
+	&TrnContextAtt = new()
+	&TrnContextAtt.AttributeName = !"TL_MovempleadosId"
+	&TrnContextAtt.AttributeValue = &TL_MovempleadosId.ToString()
+	&TrnContext.Attributes.Add(&TrnContextAtt)
+
+	&Session.Set(!"TrnContext", &TrnContext.ToXml())
+
+	/* Generated by DVelop Work With Plus Pattern [End] - Do not change */
+
+EndSub
+
+
+======================================================================
+TL_MovempleadosDet
+======================================================================
+<GxMultiForm rootId="1" version="html:15.0.0;layout:15.0.16"><Form id="1" type="layout"><detail><layout><table controlName="LayoutMainTable" tableType="Responsive" responsiveSizes="[]"><row><cell><table controlName="TableMain" class="TableMainTransaction" tableType="Responsive" responsiveSizes="[]"><row><cell><errorviewer controlName="ErrorViewer" class="ErrorViewer" /></cell></row><row><cell><table controlName="TableContent" class="TableContent" tableType="Responsive" responsiveSizes="[{&quot;scale&quot;:&quot;sm&quot;,&quot;rows&quot;:[[{&quot;width&quot;:75}]]},{&quot;scale&quot;:&quot;lg&quot;,&quot;rows&quot;:[[{&quot;width&quot;:50}]]}]"><row><cell><html controlName="Html_DVPanel_TableAttributes" formId="2" /></cell></row></table></cell></row><row><cell><actiongroup controlName="ActionGroup_Actions" /></cell></row></table></cell></row></table><actionGroups><actionGroup controlName="ActionGroup_Actions" class="TrnActionGroup"><item><action controlName="BtnTrn_Enter" onClickEvent="Enter" caption="GX_BtnEnter" class="Button" PATTERN_ELEMENT_CUSTOM_PROPERTIES="&lt;Properties&gt;&lt;Property&gt;&lt;Name&gt;title&lt;/Name&gt;&lt;Value&gt;GX_BtnEnter&lt;/Value&gt;&lt;/Property&gt;&lt;/Properties&gt;" /></item><item><action controlName="BtnTrn_Cancel" onClickEvent="Cancel" caption="GX_BtnCancel" class="BtnDefault" PATTERN_ELEMENT_CUSTOM_PROPERTIES="&lt;Properties&gt;&lt;Property&gt;&lt;Name&gt;title&lt;/Name&gt;&lt;Value&gt;GX_BtnCancel&lt;/Value&gt;&lt;/Property&gt;&lt;/Properties&gt;" /></item><item><action controlName="BtnTrn_Delete" onClickEvent="Delete" caption="GX_BtnDelete" class="BtnDefault" PATTERN_ELEMENT_CUSTOM_PROPERTIES="&lt;Properties&gt;&lt;Property&gt;&lt;Name&gt;title&lt;/Name&gt;&lt;Value&gt;GX_BtnDelete&lt;/Value&gt;&lt;/Property&gt;&lt;/Properties&gt;" /></item></actionGroup></actionGroups></layout></detail></Form><Form id="2" type="html"><BODY><gxDVelop.GXBootstrap.Panel ControlName="DVPanel_TableAttributes" AutoWidth="False" AutoHeight="True" Cls="PanelFilled_BaseColor" AutoScroll="False" Title="WWP_TemplateDataPanelTitle" Collapsible="False" Collapsed="False" ShowCollapseIcon="False" Width="100%" IconPosition="Left"><container containerId="Body"><gxLayout formId="3" ControlName="Layout_TableAttributes" /></container></gxDVelop.GXBootstrap.Panel></BODY></Form><Form id="3" type="layout"><detail><layout><table controlName="TableAttributes" class="TableData" tableType="Responsive" responsiveSizes="[]"><row><cell cellClass="DataContentCell"><data attribute="TL_MovempleadosId" labelCaption="Id" class="Attribute" /></cell></row><row><cell cellClass="DataContentCell"><data attribute="TL_MovempleadosDetNumEmp" labelCaption="Empleado" class="Attribute" /></cell></row><row><cell cellClass="DataContentCell"><data attribute="TE_EmpleadoBuscar" labelCaption="Nombre completo--Alias" class="Attribute" /></cell></row><row><cell cellClass="DataContentCell"><data attribute="TL_MovempleadosDetEstatusEmp" labelCaption="Tipo de movimiento" class="Attribute" /></cell></row><row><cell cellClass="DataContentCell"><data attribute="TL_MovempleadosDetCandidato" labelCaption="Candidato" class="Attribute" PATTERN_ELEMENT_CUSTOM_PROPERTIES="&lt;Properties&gt;&lt;Property&gt;&lt;Name&gt;ControlType&lt;/Name&gt;&lt;Value&gt;Edit&lt;/Value&gt;&lt;/Property&gt;&lt;Property&gt;&lt;Name&gt;InputType&lt;/Name&gt;&lt;Value&gt;Values&lt;/Value&gt;&lt;/Property&gt;&lt;/Properties&gt;" /></cell></row><row><cell cellClass="DataContentCell"><data attribute="TL_MovempleadosDetCandidatoNom" labelCaption="candidato" class="Attribute" /></cell></row></table></layout></detail></Form></GxMultiForm>
+
+/* Generated by DVelop Work With Plus Pattern [Start] - Do not change */
+[web]
+{
+parm(in:&Mode, in:&TL_MovempleadosId, in:&TL_MovempleadosDetCandidato);
+
+TL_MovempleadosId = &TL_MovempleadosId if not &TL_MovempleadosId.IsEmpty();
+noaccept(TL_MovempleadosId) if not &TL_MovempleadosId.IsEmpty();
+TL_MovempleadosDetCandidato = &TL_MovempleadosDetCandidato if not &TL_MovempleadosDetCandidato.IsEmpty();
+noaccept(TL_MovempleadosDetCandidato) if not &TL_MovempleadosDetCandidato.IsEmpty();
+
+}
+
+/* Generated by DVelop Work With Plus Pattern [End] - Do not change */
+
+Event Start
+
+	/* Generated by DVelop Work With Plus Pattern [Start] - Do not change */
+
+	LoadWWPContext.Call(&WWPContext)
+
+	
+	&TrnContext.FromXml(&WebSession.Get(!"TrnContext"))
+
+	/* Generated by DVelop Work With Plus Pattern [End] - Do not change */
+
+EndEvent
+
+Event After Trn
+
+	/* Generated by DVelop Work With Plus Pattern [Start] - Do not change */
+
+   [web]
+   {
+	
+	If (&Mode = TrnMode.Delete and not &TrnContext.CallerOnDelete)
+		TL_MovempleadosDetWW.Call()
+	Endif
+
+	Return
+   }
+
+	/* Generated by DVelop Work With Plus Pattern [End] - Do not change */
+
+EndEvent
+
+
+======================================================================
+TL_MovempleadosDetGeneral
+======================================================================
+<GxMultiForm rootId="1" version="html:15.0.0;layout:15.0.16"><Form id="1" type="layout"><detail><layout><table controlName="LayoutMainTable" tableType="Responsive" responsiveSizes="[]"><row><cell><table controlName="Table" class="" tableType="Responsive" responsiveSizes="[]"><row><cell><table controlName="TransactionDetail_TableAttributes" class="TableData" tableType="Responsive" responsiveSizes="[]"><row><cell cellClass="DataContentCell"><data attribute="TL_MovempleadosId" labelCaption="Id" class="ReadonlyAttribute" /></cell></row><row><cell cellClass="DataContentCell"><data attribute="TL_MovempleadosDetNumEmp" labelCaption="Empleado" class="ReadonlyAttribute" /></cell></row><row><cell cellClass="DataContentCell"><data attribute="TE_EmpleadoBuscar" labelCaption="Nombre completo--Alias" class="ReadonlyAttribute" /></cell></row><row><cell cellClass="DataContentCell"><data attribute="TL_MovempleadosDetEstatusEmp" labelCaption="Tipo de movimiento" class="ReadonlyAttribute" /></cell></row><row><cell cellClass="DataContentCell"><data attribute="TL_MovempleadosDetCandidato" labelCaption="Candidato" class="ReadonlyAttribute" /></cell></row><row><cell cellClass="DataContentCell"><data attribute="TL_MovempleadosDetCandidatoNom" labelCaption="candidato" class="ReadonlyAttribute" /></cell></row></table></cell></row><row><cell><actiongroup controlName="ActionGroup_Actions" /></cell></row></table></cell></row></table><actionGroups><actionGroup controlName="ActionGroup_Actions" class="TrnActionGroup"><item><action controlName="BtnUpdate" onClickEvent="'DoUpdate'" caption="GXM_update" class="Button" PATTERN_ELEMENT_CUSTOM_PROPERTIES="&lt;Properties&gt;&lt;Property&gt;&lt;Name&gt;title&lt;/Name&gt;&lt;Value&gt;GXM_update&lt;/Value&gt;&lt;/Property&gt;&lt;/Properties&gt;" /></item><item><action controlName="BtnDelete" onClickEvent="'DoDelete'" caption="GX_BtnDelete" class="BtnDefault" PATTERN_ELEMENT_CUSTOM_PROPERTIES="&lt;Properties&gt;&lt;Property&gt;&lt;Name&gt;title&lt;/Name&gt;&lt;Value&gt;GX_BtnDelete&lt;/Value&gt;&lt;/Property&gt;&lt;/Properties&gt;" /></item></actionGroup></actionGroups></layout></detail></Form></GxMultiForm>
+
+/* Generated by DVelop Work With Plus Pattern [Start] - Do not change */
+
+parm(in:TL_MovempleadosId, in:TL_MovempleadosDetCandidato);
+
+	/* Generated by DVelop Work With Plus Pattern [End] - Do not change */
+
+Event Start
+
+	/* Generated by DVelop Work With Plus Pattern [Start] - Do not change */
+
+	LoadWWPContext.Call(&WWPContext)
+
+	
+	Do 'PrepareTransaction'
+
+	/* Generated by DVelop Work With Plus Pattern [End] - Do not change */
+
+EndEvent
+
+Event Load
+
+	/* Generated by DVelop Work With Plus Pattern [Start] - Do not change */
+
+	// Security check for 'Actions'
+	&TempBoolean = SecGAMIsAuthByFunctionalityKey.Udp(!'tl_movempleadosdet_Update')
+	If not (&TempBoolean)
+		BtnUpdate.Visible = False
+	Endif
+	&TempBoolean = SecGAMIsAuthByFunctionalityKey.Udp(!'tl_movempleadosdet_Delete')
+	If not (&TempBoolean)
+		BtnDelete.Visible = False
+	Endif
+
+	/* Generated by DVelop Work With Plus Pattern [End] - Do not change */
+
+EndEvent
+
+Event 'DoUpdate'
+
+	/* Generated by DVelop Work With Plus Pattern [Start] - Do not change */
+
+	TL_MovempleadosDet.Call(TrnMode.Update, TL_MovempleadosId, TL_MovempleadosDetCandidato)
+
+	/* Generated by DVelop Work With Plus Pattern [End] - Do not change */
+
+EndEvent
+
+Event 'DoDelete'
+
+	/* Generated by DVelop Work With Plus Pattern [Start] - Do not change */
+
+	TL_MovempleadosDet.Call(TrnMode.Delete, TL_MovempleadosId, TL_MovempleadosDetCandidato)
+
+	/* Generated by DVelop Work With Plus Pattern [End] - Do not change */
+
+EndEvent
+
+Sub 'PrepareTransaction'
+
+	/* Generated by DVelop Work With Plus Pattern [Start] - Do not change */
+
+	&TrnContext = new()
+	&TrnContext.CallerObject = &Pgmname
+	&TrnContext.CallerOnDelete = False
+	&TrnContext.CallerURL = &HTTPRequest.ScriptName + !"?" + &HTTPRequest.QueryString
+	&TrnContext.TransactionName = !"TL_MovempleadosDet"
+
+	&TrnContextAtt = new()
+	&TrnContextAtt.AttributeName = !"TL_MovempleadosId"
+	&TrnContextAtt.AttributeValue = &TL_MovempleadosId.ToString()
+	&TrnContext.Attributes.Add(&TrnContextAtt)
+
+	&TrnContextAtt = new()
+	&TrnContextAtt.AttributeName = !"TL_MovempleadosDetCandidato"
+	&TrnContextAtt.AttributeValue = &TL_MovempleadosDetCandidato.ToString()
+	&TrnContext.Attributes.Add(&TrnContextAtt)
+
+	&Session.Set(!"TrnContext", &TrnContext.ToXml())
+
+	/* Generated by DVelop Work With Plus Pattern [End] - Do not change */
+
+EndSub
+
