@@ -1,0 +1,661 @@
+
+<title>RANNIX Design Standards</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;900&family=JetBrains+Mono:wght@400;600&display=swap');
+
+  :root {
+    --accent:   #7B5EA7;
+    --accent2:  #0A66C2;
+    --green:    #0D9457;
+    --red:      #D93025;
+    --gold:     #F5A623;
+    --text:     #1D1D1F;
+    --muted:    #6E6E73;
+    --border:   #D2D2D7;
+    --bg:       #F5F5F7;
+    --white:    #FFFFFF;
+    --surface:  #FAFAFA;
+    --card-sh:  0 2px 12px rgba(0,0,0,.08);
+    --sidebar-w: 220px;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --text:   #F5F5F7; --muted: #A1A1A6; --border: #3A3A3C;
+      --bg:     #1C1C1E; --white: #2C2C2E; --surface: #242426;
+      --card-sh: 0 2px 12px rgba(0,0,0,.3);
+    }
+  }
+  :root[data-theme="dark"] {
+    --text:   #F5F5F7; --muted: #A1A1A6; --border: #3A3A3C;
+    --bg:     #1C1C1E; --white: #2C2C2E; --surface: #242426;
+    --card-sh: 0 2px 12px rgba(0,0,0,.3);
+  }
+
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: 'Inter', system-ui, sans-serif; background: var(--bg); color: var(--text); min-height: 100vh; -webkit-font-smoothing: antialiased; font-size: 14px; line-height: 1.6; }
+
+  .layout { display: flex; min-height: 100vh; }
+
+  .sidebar {
+    width: var(--sidebar-w); flex-shrink: 0; position: sticky; top: 0;
+    height: 100vh; overflow-y: auto; background: var(--white);
+    border-right: 1px solid var(--border); padding: 24px 0;
+  }
+  .sidebar-logo { padding: 0 20px 20px; border-bottom: 1px solid var(--border); margin-bottom: 16px; }
+  .brand { display: inline-flex; align-items: center; gap: 10px; }
+  .brand-icon { width: 34px; height: 34px; background: var(--accent); border-radius: 9px; display: flex; align-items: center; justify-content: center; color: #fff; font-weight: 900; font-size: 14px; }
+  .brand-name { font-weight: 800; font-size: 15px; }
+  .brand-sub  { font-size: 10px; color: var(--muted); font-weight: 600; letter-spacing: .05em; text-transform: uppercase; }
+
+  .nav-section { padding: 8px 20px 2px; font-size: 10px; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: .06em; margin-top: 8px; }
+  .nav-link { display: block; padding: 7px 20px; font-size: 13px; color: var(--muted); text-decoration: none; font-weight: 500; border-left: 3px solid transparent; transition: all .12s; }
+  .nav-link:hover { color: var(--accent); background: rgba(123,94,167,.06); }
+  .nav-link.active { color: var(--accent); border-left-color: var(--accent); background: rgba(123,94,167,.08); font-weight: 700; }
+
+  .content { flex: 1; padding: 48px 56px 80px; max-width: 920px; }
+
+  section { margin-bottom: 64px; scroll-margin-top: 24px; }
+  .section-eyebrow { font-size: 11px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: var(--accent); margin-bottom: 6px; }
+  h1 { font-size: 30px; font-weight: 900; line-height: 1.15; margin-bottom: 10px; }
+  h2 { font-size: 21px; font-weight: 800; margin-bottom: 16px; padding-bottom: 10px; border-bottom: 2px solid var(--border); }
+  h3 { font-size: 15px; font-weight: 700; margin: 24px 0 10px; }
+  p  { margin-bottom: 12px; }
+  p:last-child { margin-bottom: 0; }
+  hr { border: none; border-top: 1px solid var(--border); margin: 48px 0; }
+
+  .hero { background: linear-gradient(135deg, var(--accent) 0%, #5A4080 100%); border-radius: 16px; padding: 36px 40px; color: #fff; margin-bottom: 48px; }
+  .hero h1 { color: #fff; font-size: 26px; }
+  .hero p  { color: rgba(255,255,255,.82); font-size: 14px; margin-top: 8px; }
+  .hero-meta { display: flex; gap: 28px; margin-top: 20px; flex-wrap: wrap; }
+  .hero-meta span { font-size: 11px; color: rgba(255,255,255,.65); font-weight: 600; }
+  .hero-meta strong { color: #fff; display: block; font-size: 13px; }
+
+  .card { background: var(--white); border: 1px solid var(--border); border-radius: 12px; padding: 20px 24px; box-shadow: var(--card-sh); margin-bottom: 16px; }
+  .card-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 14px; margin-bottom: 20px; }
+
+  .palette { display: flex; gap: 12px; flex-wrap: wrap; margin: 16px 0; }
+  .swatch { display: flex; flex-direction: column; align-items: center; gap: 8px; }
+  .swatch-color { width: 58px; height: 58px; border-radius: 12px; border: 1px solid rgba(0,0,0,.08); box-shadow: 0 2px 6px rgba(0,0,0,.12); }
+  .swatch-name  { font-size: 11px; font-weight: 700; }
+  .swatch-hex   { font-size: 10px; color: var(--muted); font-family: 'JetBrains Mono', monospace; }
+
+  pre { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 16px 18px; overflow-x: auto; font-family: 'JetBrains Mono', monospace; font-size: 12px; line-height: 1.75; margin: 12px 0; }
+  code { font-family: 'JetBrains Mono', monospace; font-size: 12px; background: var(--surface); border: 1px solid var(--border); border-radius: 4px; padding: 1px 6px; }
+  .kw { color: var(--accent); font-weight: 600; }
+  .cm { color: var(--muted); }
+  .st { color: var(--green); }
+
+  .pattern-box { border: 1.5px solid var(--border); border-radius: 12px; overflow: hidden; margin: 16px 0; }
+  .pattern-label { background: var(--surface); border-bottom: 1px solid var(--border); padding: 8px 14px; font-size: 11px; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: .05em; }
+  .pattern-demo { padding: 20px; }
+
+  .badge { display: inline-block; padding: 2px 9px; border-radius: 4px; font-size: 11px; font-weight: 700; margin-left: 8px; }
+  .b-rule { background: #EDE8F7; color: var(--accent); }
+
+  /* UI demos */
+  .demo-toggle { display: inline-flex; border: 1.5px solid var(--border); border-radius: 8px; overflow: hidden; }
+  .demo-toggle button { padding: 7px 14px; font-size: 12px; font-weight: 700; background: var(--white); border: none; cursor: pointer; color: var(--muted); }
+  .demo-toggle button.on { background: var(--accent); color: #fff; }
+
+  .demo-chips { display: flex; gap: 8px; flex-wrap: wrap; }
+  .demo-chip { border: 1.5px solid var(--border); border-radius: 99px; padding: 5px 14px; font-size: 12px; font-weight: 700; cursor: pointer; color: var(--muted); background: var(--white); transition: all .15s; }
+  .demo-chip.on { background: var(--accent); border-color: var(--accent); color: #fff; }
+
+  .demo-kpi { display: grid; grid-template-columns: repeat(3,1fr); gap: 12px; }
+  .kpi-card { background: var(--white); border: 1px solid var(--border); border-radius: 10px; padding: 14px 16px; box-shadow: var(--card-sh); }
+  .kpi-label { font-size: 10px; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; }
+  .kpi-value { font-size: 24px; font-weight: 900; color: var(--accent); margin: 4px 0; }
+  .kpi-sub   { font-size: 11px; color: var(--muted); }
+  .kpi-drill { font-size: 11px; color: var(--accent2); text-decoration: underline; cursor: pointer; margin-top: 4px; }
+
+  /* Rules */
+  .rules { list-style: none; display: flex; flex-direction: column; gap: 10px; }
+  .rules li { display: flex; gap: 12px; align-items: flex-start; padding: 12px 16px; background: var(--white); border: 1px solid var(--border); border-radius: 8px; }
+  .rules .ico { font-size: 16px; flex-shrink: 0; margin-top: 1px; }
+  .rules .rt strong { display: block; font-weight: 700; font-size: 13px; margin-bottom: 2px; }
+  .rules .rt span { color: var(--muted); font-size: 12px; }
+
+  .hl { background: rgba(123,94,167,.12); color: var(--accent); padding: 1px 5px; border-radius: 4px; font-size: 12px; font-weight: 600; }
+
+  @media (max-width: 768px) {
+    .sidebar { display: none; }
+    .content { padding: 24px 20px 60px; }
+    .demo-kpi { grid-template-columns: 1fr 1fr; }
+  }
+</style>
+
+<div class="layout">
+
+<nav class="sidebar">
+  <div class="sidebar-logo">
+    <div class="brand">
+      <div class="brand-icon">R</div>
+      <div>
+        <div class="brand-name">RANNIX</div>
+        <div class="brand-sub">Design Standards</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="nav-section">Visual</div>
+  <a href="#paleta"      class="nav-link active">Paleta de colores</a>
+  <a href="#tokens"      class="nav-link">Design tokens CSS</a>
+  <a href="#tipografia"  class="nav-link">Tipografía</a>
+  <a href="#componentes" class="nav-link">Componentes base</a>
+
+  <div class="nav-section">Patrones UX</div>
+  <a href="#drilldown"   class="nav-link">Drill-down</a>
+  <a href="#kpis"        class="nav-link">KPI Cards</a>
+  <a href="#toggle"      class="nav-link">Toggle de vista</a>
+  <a href="#chips"       class="nav-link">Chips de filtro</a>
+  <a href="#modales"     class="nav-link">Modales</a>
+
+  <div class="nav-section">Funcionalidades</div>
+  <a href="#ocr"         class="nav-link">OCR con IA</a>
+  <a href="#explorador"  class="nav-link">Explorador de datos</a>
+  <a href="#auditoria"   class="nav-link">Auditoría</a>
+
+  <div class="nav-section">Reglas</div>
+  <a href="#ux-rules"    class="nav-link">Reglas UX</a>
+  <a href="#seguridad"   class="nav-link">Seguridad API</a>
+  <a href="#stack"       class="nav-link">Stack &amp; Deploy</a>
+</nav>
+
+<main class="content">
+
+  <div class="hero">
+    <div class="section-eyebrow" style="color:rgba(255,255,255,.7)">Estándares de desarrollo</div>
+    <h1>RANNIX Design &amp; UX Standards</h1>
+    <p>Guía de referencia de diseño, componentes y patrones UX para aplicaciones RANNIX Consulting. Comparte este documento con Claude Code al iniciar cualquier nuevo proyecto — aplican como estándar base, sin necesidad de repetirlos.</p>
+    <div class="hero-meta">
+      <span><strong>Autor</strong>Roberto Aguilar Cota</span>
+      <span><strong>Firma</strong>RANNIX Consulting</span>
+      <span><strong>Stack</strong>React 18 · Vite · Supabase · Netlify · Claude API</span>
+    </div>
+  </div>
+
+  <!-- ── Paleta ── -->
+  <section id="paleta">
+    <div class="section-eyebrow">Identidad visual</div>
+    <h2>Paleta de colores</h2>
+    <p>La paleta es fija para todos los proyectos RANNIX. El color primario es <strong>morado IwolPark</strong>. No se altera por módulo ni por contexto.</p>
+    <div class="palette">
+      <div class="swatch"><div class="swatch-color" style="background:#7B5EA7"></div><div class="swatch-name">Accent</div><div class="swatch-hex">#7B5EA7</div></div>
+      <div class="swatch"><div class="swatch-color" style="background:#5A4080"></div><div class="swatch-name">Accent Dark</div><div class="swatch-hex">#5A4080</div></div>
+      <div class="swatch"><div class="swatch-color" style="background:#F2EEFA"></div><div class="swatch-name">Accent Light</div><div class="swatch-hex">#F2EEFA</div></div>
+      <div class="swatch"><div class="swatch-color" style="background:#0A66C2"></div><div class="swatch-name">Accent 2</div><div class="swatch-hex">#0A66C2</div></div>
+      <div class="swatch"><div class="swatch-color" style="background:#0D9457"></div><div class="swatch-name">Green</div><div class="swatch-hex">#0D9457</div></div>
+      <div class="swatch"><div class="swatch-color" style="background:#D93025"></div><div class="swatch-name">Red</div><div class="swatch-hex">#D93025</div></div>
+      <div class="swatch"><div class="swatch-color" style="background:#F5A623"></div><div class="swatch-name">Gold</div><div class="swatch-hex">#F5A623</div></div>
+      <div class="swatch"><div class="swatch-color" style="background:#1D1D1F"></div><div class="swatch-name">Text</div><div class="swatch-hex">#1D1D1F</div></div>
+      <div class="swatch"><div class="swatch-color" style="background:#6E6E73"></div><div class="swatch-name">Muted</div><div class="swatch-hex">#6E6E73</div></div>
+      <div class="swatch"><div class="swatch-color" style="background:#F5F5F7"></div><div class="swatch-name">BG</div><div class="swatch-hex">#F5F5F7</div></div>
+      <div class="swatch"><div class="swatch-color" style="background:#D2D2D7"></div><div class="swatch-name">Border</div><div class="swatch-hex">#D2D2D7</div></div>
+    </div>
+    <p>Uso semántico obligatorio: <span class="hl">green</span> = éxito / activo · <span class="hl">red</span> = error / vencido · <span class="hl">gold</span> = advertencia / pendiente · <span class="hl">accent2</span> = acciones secundarias y enlaces.</p>
+  </section>
+
+  <!-- ── Tokens ── -->
+  <section id="tokens">
+    <h2>Design Tokens CSS</h2>
+    <p>Todos los colores, sombras y medidas se definen como custom properties en <code>:root</code> en el archivo <code>src/styles/theme.css</code>. Nunca usar valores hardcodeados en componentes — siempre referenciar el token.</p>
+    <pre><span class="cm">/* src/styles/theme.css */</span>
+<span class="kw">:root</span> {
+  --accent:          #7B5EA7;
+  --accent2:         #0A66C2;
+  --green:           #0D9457;
+  --red:             #D93025;
+  --gold:            #F5A623;
+  --text:            #1D1D1F;
+  --muted:           #6E6E73;
+  --border:          #D2D2D7;
+  --bg:              #F5F5F7;
+  --white:           #FFFFFF;
+  --card-sh:         0 2px 12px rgba(0,0,0,.08);
+
+  <span class="cm">/* Alias semánticos */</span>
+  --color-primary:   var(--accent);
+  --color-success:   var(--green);
+  --color-danger:    var(--red);
+  --color-warning:   var(--gold);
+  --color-background:var(--bg);
+  --color-surface:   var(--white);
+
+  <span class="cm">/* Geometría */</span>
+  --border-radius:   8px;
+  --header-height:   52px;
+}</pre>
+  </section>
+
+  <!-- ── Tipografía ── -->
+  <section id="tipografia">
+    <h2>Tipografía</h2>
+    <p>Font stack principal: <code>'Segoe UI', system-ui, -apple-system, sans-serif</code>. Monospace para IDs, códigos, valores numéricos de precisión: <code>'Consolas', 'Courier New', monospace</code>.</p>
+    <div class="card">
+      <div style="font-size:28px;font-weight:900;margin-bottom:10px">Título de página — 28px / 900</div>
+      <div style="font-size:22px;font-weight:800;margin-bottom:10px">Sección principal — 22px / 800</div>
+      <div style="font-size:16px;font-weight:900;margin-bottom:10px">Título de modal — 16px / 900</div>
+      <div style="font-size:15px;font-weight:700;margin-bottom:10px">Card title — 15px / 700</div>
+      <div style="font-size:13px;margin-bottom:10px">Texto de tabla y formulario — 13px / 400</div>
+      <div style="font-size:11px;font-weight:700;color:#6E6E73;text-transform:uppercase;letter-spacing:.5px;margin-bottom:10px">ENCABEZADO DE COLUMNA — 11px / 700 / uppercase</div>
+      <div style="font-size:10px;color:#6E6E73;">Eyebrow / meta / etiqueta — 10px muted</div>
+    </div>
+  </section>
+
+  <!-- ── Componentes ── -->
+  <section id="componentes">
+    <h2>Componentes base</h2>
+    <p>Clases CSS utilitarias definidas en <code>theme.css</code>. Usarlas directamente; no crear variantes ad-hoc.</p>
+
+    <h3>Botones</h3>
+    <div class="pattern-box">
+      <div class="pattern-label">Demo</div>
+      <div class="pattern-demo" style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;">
+        <button style="background:#7B5EA7;color:#fff;border:none;border-radius:8px;padding:9px 18px;font-size:13px;font-weight:700;cursor:pointer;">.btn</button>
+        <button style="background:#0A66C2;color:#fff;border:none;border-radius:8px;padding:9px 18px;font-size:13px;font-weight:700;cursor:pointer;">.btn.secondary</button>
+        <button style="background:#fff;color:#7B5EA7;border:1.5px solid #7B5EA7;border-radius:8px;padding:9px 18px;font-size:13px;font-weight:700;cursor:pointer;">.btn.outline</button>
+        <button style="background:#0D9457;color:#fff;border:none;border-radius:8px;padding:9px 18px;font-size:13px;font-weight:700;cursor:pointer;">.btn.green</button>
+        <button style="background:#D93025;color:#fff;border:none;border-radius:8px;padding:9px 18px;font-size:13px;font-weight:700;cursor:pointer;">.btn.red</button>
+        <button style="background:#7B5EA7;color:#fff;border:none;border-radius:8px;padding:5px 12px;font-size:11px;font-weight:700;cursor:pointer;">.btn.sm</button>
+      </div>
+    </div>
+
+    <h3>Badges de estado</h3>
+    <div class="pattern-box">
+      <div class="pattern-label">Demo</div>
+      <div class="pattern-demo" style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
+        <span style="display:inline-block;padding:2px 9px;border-radius:4px;font-size:11px;font-weight:700;background:#E6F7EF;color:#0D9457;">ACTIVO</span>
+        <span style="display:inline-block;padding:2px 9px;border-radius:4px;font-size:11px;font-weight:700;background:#FEE2E2;color:#D93025;">VENCIDO</span>
+        <span style="display:inline-block;padding:2px 9px;border-radius:4px;font-size:11px;font-weight:700;background:#FEF3C7;color:#F5A623;">PENDIENTE</span>
+        <span style="display:inline-block;padding:2px 9px;border-radius:4px;font-size:11px;font-weight:700;background:#EDE8F7;color:#7B5EA7;">EN PROCESO</span>
+        <span style="display:inline-block;padding:2px 9px;border-radius:4px;font-size:11px;font-weight:700;background:#F3F4F6;color:#6E6E73;">INACTIVO</span>
+      </div>
+    </div>
+
+    <h3>Cards</h3>
+    <pre><span class="cm">/* Clase .card — uso estándar */</span>
+&lt;<span class="kw">div</span> className=<span class="st">"card"</span>&gt;contenido&lt;/<span class="kw">div</span>&gt;
+
+<span class="cm">/* Grid de cards */</span>
+&lt;<span class="kw">div</span> className=<span class="st">"card-grid"</span>&gt;
+  &lt;<span class="kw">div</span> className=<span class="st">"card"</span>&gt;...&lt;/<span class="kw">div</span>&gt;
+  &lt;<span class="kw">div</span> className=<span class="st">"card"</span>&gt;...&lt;/<span class="kw">div</span>&gt;
+&lt;/<span class="kw">div</span>&gt;</pre>
+
+    <h3>Tablas</h3>
+    <pre><span class="cm">/* Siempre envolver en .tabla-wrap para scroll horizontal */</span>
+&lt;<span class="kw">div</span> className=<span class="st">"tabla-wrap"</span>&gt;
+  &lt;<span class="kw">table</span>&gt;
+    &lt;<span class="kw">thead</span>&gt;
+      &lt;<span class="kw">tr</span>&gt;&lt;<span class="kw">th</span>&gt;Columna&lt;/<span class="kw">th</span>&gt;&lt;/<span class="kw">tr</span>&gt;
+    &lt;/<span class="kw">thead</span>&gt;
+    &lt;<span class="kw">tbody</span>&gt;
+      &lt;<span class="kw">tr</span> className=<span class="st">"clickable"</span> onClick=&#123;() =&gt; setSelected(row)&#125;&gt;
+        &lt;<span class="kw">td</span>&gt;...&lt;/<span class="kw">td</span>&gt;
+      &lt;/<span class="kw">tr</span>&gt;
+    &lt;/<span class="kw">tbody</span>&gt;
+  &lt;/<span class="kw">table</span>&gt;
+&lt;/<span class="kw">div</span>&gt;</pre>
+  </section>
+
+  <hr>
+
+  <!-- ── Drill-down ── -->
+  <section id="drilldown">
+    <div class="section-eyebrow">Patrones UX</div>
+    <h2>Drill-down en datos <span class="badge b-rule">Regla core</span></h2>
+    <p><strong>Todo número calculado o entidad listada es clickeable.</strong> El detalle se despliega en contexto — modal o expansión inline — sin navegar a otra pantalla.</p>
+    <ul class="rules">
+      <li><span class="ico">🔢</span><div class="rt"><strong>Cifra en KPI → modal con desglose</strong><span>Clic en un total abre un panel que muestra los registros que componen ese número.</span></div></li>
+      <li><span class="ico">📋</span><div class="rt"><strong>Fila de tabla → modal de detalle/edición</strong><span>Todas las filas tienen <code>className="clickable"</code> y un handler <code>onClick={() => setSelected(row)}</code>.</span></div></li>
+      <li><span class="ico">📅</span><div class="rt"><strong>Evento en calendario → modal del registro</strong><span>Cada chip de evento abre directamente el modal de edición de ese registro.</span></div></li>
+      <li><span class="ico">📊</span><div class="rt"><strong>Total por categoría → filtro automático</strong><span>Clic en un subtotal filtra la tabla a esa categoría sin recargar la página.</span></div></li>
+    </ul>
+    <pre><span class="kw">const</span> [selected, setSelected] = useState(<span class="kw">null</span>)
+
+<span class="cm">// Fila clickeable estándar</span>
+&lt;<span class="kw">tr</span> className=<span class="st">"clickable"</span> onClick=&#123;() =&gt; setSelected(row)&#125;&gt;
+  &lt;<span class="kw">td</span>&gt;...&lt;/<span class="kw">td</span>&gt;
+&lt;/<span class="kw">tr</span>&gt;
+
+&#123;selected &amp;&amp; &lt;<span class="kw">ModalDetalle</span> row=&#123;selected&#125; onClose=&#123;() =&gt; setSelected(<span class="kw">null</span>)&#125; /&gt;&#125;
+
+<span class="cm">/* CSS ya incluido en theme.css:
+   tr.clickable:hover td { background: #FAFAFE; cursor: pointer; } */</span></pre>
+  </section>
+
+  <!-- ── KPIs ── -->
+  <section id="kpis">
+    <h2>KPI Cards</h2>
+    <p>Cada módulo con datos numéricos inicia con una fila de cards de resumen. Las cards con drill-down muestran un enlace "Ver desglose →" y tienen <code>cursor: pointer</code>.</p>
+    <div class="pattern-box">
+      <div class="pattern-label">Demo</div>
+      <div class="pattern-demo">
+        <div class="demo-kpi">
+          <div class="kpi-card">
+            <div class="kpi-label">Total ingresos</div>
+            <div class="kpi-value">$45,200</div>
+            <div class="kpi-sub">18 registros</div>
+            <div class="kpi-drill">Ver desglose →</div>
+          </div>
+          <div class="kpi-card">
+            <div class="kpi-label">Total egresos</div>
+            <div class="kpi-value" style="color:#D93025;">$12,840</div>
+            <div class="kpi-sub">7 proveedores</div>
+            <div class="kpi-drill">Ver desglose →</div>
+          </div>
+          <div class="kpi-card">
+            <div class="kpi-label">Balance</div>
+            <div class="kpi-value" style="color:#0D9457;">$32,360</div>
+            <div class="kpi-sub">+18% vs mes ant.</div>
+            <div class="kpi-drill">Ver movimientos →</div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <pre><span class="kw">function</span> KpiCard(&#123; label, value, sub, color, onClick &#125;) &#123;
+  <span class="kw">return</span> (
+    &lt;<span class="kw">div</span> className=<span class="st">"card"</span>
+      onClick=&#123;onClick&#125;
+      style=&#123;&#123; cursor: onClick ? <span class="st">'pointer'</span> : <span class="st">'default'</span> &#125;&#125;&gt;
+      &lt;<span class="kw">div</span> style=&#123;&#123; fontSize:10, fontWeight:700, color:<span class="st">'var(--muted)'</span>, textTransform:<span class="st">'uppercase'</span> &#125;&#125;&gt;&#123;label&#125;&lt;/<span class="kw">div</span>&gt;
+      &lt;<span class="kw">div</span> style=&#123;&#123; fontSize:28, fontWeight:900, color: color || <span class="st">'var(--accent)'</span> &#125;&#125;&gt;&#123;value&#125;&lt;/<span class="kw">div</span>&gt;
+      &lt;<span class="kw">div</span> style=&#123;&#123; fontSize:11, color:<span class="st">'var(--muted)'</span> &#125;&#125;&gt;&#123;sub&#125;&lt;/<span class="kw">div</span>&gt;
+      &#123;onClick &amp;&amp; &lt;<span class="kw">div</span> style=&#123;&#123; fontSize:11, color:<span class="st">'var(--accent2)'</span>, textDecoration:<span class="st">'underline'</span> &#125;&#125;&gt;Ver desglose →&lt;/<span class="kw">div</span>&gt;&#125;
+    &lt;/<span class="kw">div</span>&gt;
+  )
+&#125;</pre>
+  </section>
+
+  <!-- ── Toggle ── -->
+  <section id="toggle">
+    <h2>Toggle de vista</h2>
+    <p>En módulos con datos temporales, ofrecer al usuario cambiar entre vista de <strong>tabla/grid</strong> y vista de <strong>calendario mensual</strong>. El mismo filtro de fecha aplica a ambas.</p>
+    <div class="pattern-box">
+      <div class="pattern-label">Demo</div>
+      <div class="pattern-demo" style="display:flex;align-items:center;gap:14px;">
+        <div class="demo-toggle">
+          <button class="on">☰ Tabla</button>
+          <button>📅 Calendario</button>
+        </div>
+        <span style="font-size:12px;color:var(--muted);">El estado se guarda en <code>useState</code>, no en URL</span>
+      </div>
+    </div>
+    <pre><span class="kw">const</span> [vistaCalendario, setVistaCalendario] = useState(<span class="kw">false</span>)
+
+<span class="cm">// Toggle en el toolbar</span>
+&lt;<span class="kw">div</span> style=&#123;&#123; display:<span class="st">'flex'</span>, border:<span class="st">'1.5px solid var(--border)'</span>, borderRadius:8, overflow:<span class="st">'hidden'</span> &#125;&#125;&gt;
+  &lt;<span class="kw">button</span> onClick=&#123;() =&gt; setVistaCalendario(<span class="kw">false</span>)&#125;
+    style=&#123;&#123; background: !vistaCalendario ? <span class="st">'var(--accent)'</span> : <span class="st">'#fff'</span>, color: !vistaCalendario ? <span class="st">'#fff'</span> : <span class="st">'var(--muted)'</span>, ... &#125;&#125;&gt;
+    ☰ Tabla
+  &lt;/<span class="kw">button</span>&gt;
+  &lt;<span class="kw">button</span> onClick=&#123;() =&gt; setVistaCalendario(<span class="kw">true</span>)&#125; ...&gt;📅 Calendario&lt;/<span class="kw">button</span>&gt;
+&lt;/<span class="kw">div</span>&gt;
+
+<span class="cm">// Render condicional</span>
+&#123;vistaCalendario
+  ? &lt;<span class="kw">VistaCalendario</span> datos=&#123;datosFiltrados&#125; mes=&#123;mesSel&#125; /&gt;
+  : &lt;<span class="kw">TablaGrid</span> datos=&#123;datosFiltrados&#125; /&gt;
+&#125;</pre>
+
+    <h3>Vista Calendario — estructura base</h3>
+    <pre><span class="kw">function</span> VistaCalendario(&#123; datos, mes &#125;) &#123;
+  <span class="kw">const</span> dias = getDiasDelMes(mes)          <span class="cm">// [&#123;fecha:'2026-08-01', diaSemana:6&#125;, ...]</span>
+  <span class="kw">const</span> byFecha = groupBy(datos, <span class="st">'fecha'</span>)  <span class="cm">// &#123;'2026-08-01': [row,...], ...&#125;</span>
+
+  <span class="kw">return</span> (
+    &lt;&gt;
+      &lt;<span class="kw">div</span> style=&#123;&#123; display:<span class="st">'grid'</span>, gridTemplateColumns:<span class="st">'repeat(7,1fr)'</span> &#125;&#125;&gt;
+        &#123;[<span class="st">'Lun'</span>,<span class="st">'Mar'</span>,<span class="st">'Mié'</span>,<span class="st">'Jue'</span>,<span class="st">'Vie'</span>,<span class="st">'Sáb'</span>,<span class="st">'Dom'</span>].map(d =&gt; &lt;<span class="kw">div</span> key=&#123;d&#125;&gt;&#123;d&#125;&lt;/<span class="kw">div</span>&gt;)&#125;
+      &lt;/<span class="kw">div</span>&gt;
+      &lt;<span class="kw">div</span> style=&#123;&#123; display:<span class="st">'grid'</span>, gridTemplateColumns:<span class="st">'repeat(7,1fr)'</span>, gap:4 &#125;&#125;&gt;
+        &#123;dias.map(d =&gt; (
+          &lt;<span class="kw">div</span> key=&#123;d.fecha&#125; style=&#123;&#123; minHeight:90, border:<span class="st">'1px solid var(--border)'</span>, borderRadius:8, padding:6 &#125;&#125;&gt;
+            &lt;<span class="kw">div</span>&gt;&#123;d.dia&#125;&lt;/<span class="kw">div</span>&gt;
+            &#123;(byFecha[d.fecha] || []).map(r =&gt;
+              &lt;<span class="kw">div</span> key=&#123;r.id&#125; className=<span class="st">"chip on"</span> onClick=&#123;() =&gt; setSelected(r)&#125;&gt;
+                &#123;r.descripcion&#125;
+              &lt;/<span class="kw">div</span>&gt;
+            )&#125;
+          &lt;/<span class="kw">div</span>&gt;
+        ))&#125;
+      &lt;/<span class="kw">div</span>&gt;
+    &lt;/&gt;
+  )
+&#125;</pre>
+  </section>
+
+  <!-- ── Chips ── -->
+  <section id="chips">
+    <h2>Chips de filtro rápido</h2>
+    <p>Para filtrar por categoría, estado o período. Se muestran como fila horizontal debajo del toolbar. Un clic activa/desactiva — togglean entre el valor y <code>'todos'</code>.</p>
+    <div class="pattern-box">
+      <div class="pattern-label">Demo</div>
+      <div class="pattern-demo">
+        <div class="demo-chips">
+          <div class="demo-chip on">Todos</div>
+          <div class="demo-chip">Categoría A</div>
+          <div class="demo-chip">Categoría B</div>
+          <div class="demo-chip">Categoría C</div>
+        </div>
+      </div>
+    </div>
+    <pre><span class="kw">const</span> [filtro, setFiltro] = useState(<span class="st">'todos'</span>)
+
+&#123;CATEGORIAS.map(cat =&gt; (
+  &lt;<span class="kw">button</span> key=&#123;cat.id&#125;
+    className=&#123;<span class="st">`chip $&#123;filtro === cat.id ? 'on' : ''&#125;`</span>&#125;
+    onClick=&#123;() =&gt; setFiltro(filtro === cat.id ? <span class="st">'todos'</span> : cat.id)&#125;&gt;
+    &#123;cat.label&#125;
+  &lt;/<span class="kw">button</span>&gt;
+))&#125;
+
+<span class="cm">// Aplicar filtro a los datos</span>
+<span class="kw">const</span> datosFiltrados = useMemo(() =&gt;
+  filtro === <span class="st">'todos'</span> ? datos : datos.filter(r =&gt; r.categoria === filtro)
+, [datos, filtro])</pre>
+  </section>
+
+  <!-- ── Modales ── -->
+  <section id="modales">
+    <h2>Modales</h2>
+    <p>Todos los formularios de alta, edición y confirmación se abren en modal centrado. El overlay cierra al hacer clic fuera. El encabezado es sticky para formularios largos.</p>
+    <pre><span class="cm">/* Clases CSS: .modal-overlay > .modal-box > .modal-head + .modal-body + .modal-foot */</span>
+
+<span class="kw">function</span> Modal(&#123; open, onClose, title, children, footer &#125;) &#123;
+  <span class="kw">return</span> (
+    &lt;<span class="kw">div</span> className=&#123;<span class="st">`modal-overlay $&#123;open ? 'open' : ''&#125;`</span>&#125;
+      onClick=&#123;e =&gt; e.target === e.currentTarget &amp;&amp; onClose()&#125;&gt;
+      &lt;<span class="kw">div</span> className=<span class="st">"modal-box"</span>&gt;         <span class="cm">// ancho: modal-box.wide = 1000px</span>
+        &lt;<span class="kw">div</span> className=<span class="st">"modal-head"</span>&gt;
+          &lt;<span class="kw">span</span> className=<span class="st">"modal-title"</span>&gt;&#123;title&#125;&lt;/<span class="kw">span</span>&gt;
+          &lt;<span class="kw">button</span> className=<span class="st">"modal-close"</span> onClick=&#123;onClose&#125;&gt;×&lt;/<span class="kw">button</span>&gt;
+        &lt;/<span class="kw">div</span>&gt;
+        &lt;<span class="kw">div</span> className=<span class="st">"modal-body"</span>&gt;&#123;children&#125;&lt;/<span class="kw">div</span>&gt;
+        &lt;<span class="kw">div</span> className=<span class="st">"modal-foot"</span>&gt;&#123;footer&#125;&lt;/<span class="kw">div</span>&gt;
+      &lt;/<span class="kw">div</span>&gt;
+    &lt;/<span class="kw">div</span>&gt;
+  )
+&#125;</pre>
+  </section>
+
+  <hr>
+
+  <!-- ── OCR ── -->
+  <section id="ocr">
+    <div class="section-eyebrow">Funcionalidades</div>
+    <h2>OCR con IA (Claude Vision)</h2>
+    <p>En módulos donde se capturan documentos físicos (tickets, recibos, reportes escaneados), la IA transcribe el contenido via Claude Vision. Hay dos modos: ticket individual y carga masiva.</p>
+
+    <h3>Flujo individual</h3>
+    <ul class="rules">
+      <li><span class="ico">1️⃣</span><div class="rt"><strong>Usuario sube imagen</strong><span><code>input type="file" accept="image/*"</code> — se convierte a base64 con <code>FileReader</code>.</span></div></li>
+      <li><span class="ico">2️⃣</span><div class="rt"><strong>POST a Netlify Function</strong><span>El frontend envía <code>&#123; b64, mediaType &#125;</code> a la function. La API key de Claude nunca va al frontend.</span></div></li>
+      <li><span class="ico">3️⃣</span><div class="rt"><strong>Claude Vision extrae datos</strong><span>El prompt pide respuesta en JSON puro con los campos del formulario. Usar <code>claude-sonnet-4-6</code>.</span></div></li>
+      <li><span class="ico">4️⃣</span><div class="rt"><strong>Parse robusto con regex</strong><span><code>text.match(/\{[\s\S]*\}/)</code> — extrae el JSON aunque Claude anteponga texto introductorio.</span></div></li>
+      <li><span class="ico">5️⃣</span><div class="rt"><strong>Usuario revisa y corrige</strong><span>Los datos prellenan el formulario. El usuario puede editar antes de guardar.</span></div></li>
+      <li><span class="ico">6️⃣</span><div class="rt"><strong>Imagen guardada en Storage</strong><span>Tras guardar el registro, la imagen original sube a Supabase Storage. El URL queda en la tabla (<code>ticket_url</code>, <code>imagen_url</code>, etc.).</span></div></li>
+    </ul>
+
+    <h3>Carga masiva (N documentos)</h3>
+    <pre><span class="cm">// Estado del proceso batch</span>
+<span class="kw">const</span> [tickets, setTickets] = useState([])
+<span class="cm">// ticket: &#123; file, b64, mtype, datos, procesando, ok, error &#125;</span>
+
+<span class="cm">// 1. Selección múltiple</span>
+&lt;<span class="kw">input</span> type=<span class="st">"file"</span> multiple accept=<span class="st">"image/*"</span>
+  onChange=&#123;e =&gt; iniciarBatch([...e.target.files])&#125; /&gt;
+
+<span class="cm">// 2. OCR en paralelo — SIEMPRE Promise.all, no en serie</span>
+<span class="kw">await</span> Promise.all(files.map(<span class="kw">async</span> (file, i) =&gt; &#123;
+  <span class="kw">const</span> &#123; b64, mtype &#125; = <span class="kw">await</span> fileToB64(file)
+  <span class="kw">const</span> datos = <span class="kw">await</span> ocrizarDocumento(b64, mtype)
+  setTickets(prev =&gt; prev.map((t, j) =&gt; j === i ? &#123;...t, datos, ok: <span class="kw">true</span>&#125; : t))
+&#125;))
+
+<span class="cm">// 3. Tabla editable — un renglón por documento
+// 4. "Guardar todos" — insert en batch + upload de imágenes</span></pre>
+
+    <h3>Parse robusto en Netlify Function</h3>
+    <pre><span class="cm">// OBLIGATORIO — Claude puede anteponer texto antes del JSON</span>
+<span class="kw">const</span> text = response.content[0].text
+<span class="kw">const</span> match = text.match(<span class="st">/\{[\s\S]*\}/</span>)
+<span class="kw">if</span> (!match) <span class="kw">return</span> &#123;
+  statusCode: 200,
+  body: JSON.stringify(&#123; <span class="cm">/* campos vacíos */</span> raw: text &#125;)
+&#125;
+<span class="kw">const</span> parsed = JSON.parse(match[0])</pre>
+  </section>
+
+  <!-- ── Explorador ── -->
+  <section id="explorador">
+    <h2>Explorador de datos (Utilidades)</h2>
+    <p>Módulo de administración en <code>/utilidades</code> que permite consultar cualquier tabla de la BD sin salir de la app. Útil para soporte, auditoría y validación de datos.</p>
+    <ul class="rules">
+      <li><span class="ico">🗂️</span><div class="rt"><strong>Selector de tabla agrupado</strong><span>Las tablas se organizan por dominio funcional (Operación, RH, Catálogos, Sistema). Un <code>select</code> agrupado permite navegar.</span></div></li>
+      <li><span class="ico">🔍</span><div class="rt"><strong>Búsqueda global</strong><span>Input que filtra en todos los campos de texto sobre los datos ya cargados (client-side, sin re-query).</span></div></li>
+      <li><span class="ico">▼</span><div class="rt"><strong>Filtro por columna</strong><span>Dropdown en cada encabezado con operadores: contiene, igual, empieza con, mayor/menor que, es null.</span></div></li>
+      <li><span class="ico">↕️</span><div class="rt"><strong>Ordenamiento por columna</strong><span>Clic en encabezado alterna asc/desc. Ícono de flecha indica columna y dirección activas.</span></div></li>
+      <li><span class="ico">📥</span><div class="rt"><strong>Exportar CSV</strong><span>Descarga los datos visibles (con filtros aplicados) como CSV.</span></div></li>
+    </ul>
+    <pre><span class="cm">// Definición de tablas disponibles</span>
+<span class="kw">const</span> TABLAS = [
+  &#123; schema: <span class="st">'public'</span>, table: <span class="st">'mi_tabla'</span>, label: <span class="st">'Nombre legible'</span>, grupo: <span class="st">'Operación'</span> &#125;,
+  <span class="cm">// ...</span>
+]
+
+<span class="cm">// Query con paginación</span>
+<span class="kw">const</span> &#123; data &#125; = <span class="kw">await</span> supabase
+  .from(tablaActiva.table)
+  .select(<span class="st">'*'</span>)
+  .range(page * 50, (page + 1) * 50 - 1)
+  .order(sortCol, &#123; ascending: sortDir === <span class="st">'asc'</span> &#125;)</pre>
+  </section>
+
+  <!-- ── Auditoría ── -->
+  <section id="auditoria">
+    <h2>Auditoría de accesos</h2>
+    <p>Cada módulo registra su acceso con un hook. Las acciones críticas (crear, editar, eliminar) registran un log adicional via RPC.</p>
+    <pre><span class="cm">// En cada página — registra el acceso al montar</span>
+<span class="kw">import</span> &#123; useModuleAudit &#125; <span class="kw">from</span> <span class="st">'../hooks/useAudit'</span>
+useModuleAudit(<span class="st">'nombre_modulo'</span>)
+
+<span class="cm">// Para acciones manuales</span>
+<span class="kw">await</span> supabase.rpc(<span class="st">'log_bitacora'</span>, &#123;
+  p_modulo:  <span class="st">'mi_modulo'</span>,
+  p_accion:  <span class="st">'INSERT'</span> | <span class="st">'UPDATE'</span> | <span class="st">'DELETE'</span>,
+  p_detalle: <span class="st">`descripción del cambio`</span>,
+&#125;)</pre>
+  </section>
+
+  <hr>
+
+  <!-- ── Reglas UX ── -->
+  <section id="ux-rules">
+    <div class="section-eyebrow">Reglas absolutas</div>
+    <h2>Reglas de diseño UX</h2>
+    <p>Estas reglas se aplican en <strong>cualquier aplicación RANNIX</strong>, sin excepción. No hay que pedírselas a Claude Code — este documento las establece como estándar.</p>
+    <ul class="rules">
+      <li><span class="ico">👆</span><div class="rt"><strong>Todo número y entidad es clickeable</strong><span>El detalle se abre en modal o expansión inline. Nunca navegar a otra pantalla para ver el detalle de un dato.</span></div></li>
+      <li><span class="ico">📊</span><div class="rt"><strong>KPI Cards al inicio de cada módulo</strong><span>Cards de resumen con totales calculados antes de la tabla de detalle. Las cards con drill-down incluyen enlace "Ver desglose →".</span></div></li>
+      <li><span class="ico">📅</span><div class="rt"><strong>Vistas duales en módulos temporales</strong><span>Toggle entre tabla y calendario mensual cuando el módulo maneja datos con fecha. El mismo filtro aplica a ambas vistas.</span></div></li>
+      <li><span class="ico">🏷️</span><div class="rt"><strong>Chips para filtros rápidos por categoría</strong><span>No usar dropdowns para filtrar categorías — usar chips horizontales. Un clic activa/desactiva. Múltiples chips pueden coexistir.</span></div></li>
+      <li><span class="ico">🔍</span><div class="rt"><strong>Búsqueda global siempre presente</strong><span>Input de búsqueda en el toolbar de cualquier módulo que liste datos.</span></div></li>
+      <li><span class="ico">📷</span><div class="rt"><strong>Conservar imagen fuente en OCR</strong><span>Siempre subir la imagen original a Supabase Storage y guardar el URL en el registro. No descartar la fuente.</span></div></li>
+      <li><span class="ico">✏️</span><div class="rt"><strong>OCR prelllena — humano revisa</strong><span>Los datos de IA prellenan el formulario. El usuario siempre revisa y puede corregir antes de guardar. Nunca guardar automáticamente.</span></div></li>
+      <li><span class="ico">⚡</span><div class="rt"><strong>OCR masivo en paralelo</strong><span>Usar <code>Promise.all()</code> para procesar N imágenes simultáneamente. Nunca en serie.</span></div></li>
+      <li><span class="ico">🎨</span><div class="rt"><strong>Nunca hardcodear colores en componentes</strong><span>Siempre usar tokens CSS (<code>var(--accent)</code>, <code>var(--green)</code>, etc.). Los valores literales solo en <code>theme.css</code>.</span></div></li>
+      <li><span class="ico">📱</span><div class="rt"><strong>Tablas siempre con scroll horizontal</strong><span>Envolver siempre en <code>div.tabla-wrap</code> para que el contenido no rompa el layout en pantallas angostas.</span></div></li>
+    </ul>
+  </section>
+
+  <!-- ── Seguridad ── -->
+  <section id="seguridad">
+    <h2>Seguridad API</h2>
+    <ul class="rules">
+      <li><span class="ico">🔒</span><div class="rt"><strong>ANTHROPIC_API_KEY — solo en servidor</strong><span>NUNCA en variables <code>VITE_</code>, nunca en <code>.env.local</code>, nunca en el bundle del frontend. Solo en Netlify Environment Variables.</span></div></li>
+      <li><span class="ico">🔒</span><div class="rt"><strong>SUPABASE_SERVICE_ROLE_KEY — solo en Functions</strong><span>El frontend siempre usa la <code>anon key</code>. La service role key solo en funciones serverless que requieren bypass de RLS.</span></div></li>
+      <li><span class="ico">🌐</span><div class="rt"><strong>Claude API vía Netlify Functions</strong><span>El frontend llama a <code>/.netlify/functions/nombre</code>. Las functions son el único proxy hacia Claude. Nunca llamada directa desde el browser.</span></div></li>
+      <li><span class="ico">🛡️</span><div class="rt"><strong>RLS habilitado en todas las tablas</strong><span>Supabase Row Level Security activo en toda tabla. El cliente con anon key solo ve lo que la política permite.</span></div></li>
+    </ul>
+    <pre><span class="cm">/* .env.local — solo variables VITE_ (visibles en el bundle) */</span>
+VITE_SUPABASE_URL=https://&lt;project&gt;.supabase.co
+VITE_SUPABASE_ANON_KEY=eyJ...
+
+<span class="cm">/* Netlify Environment Variables ÚNICAMENTE */</span>
+ANTHROPIC_API_KEY=sk-ant-...
+SUPABASE_SERVICE_ROLE_KEY=eyJ...</pre>
+  </section>
+
+  <!-- ── Stack ── -->
+  <section id="stack">
+    <h2>Stack &amp; Deploy</h2>
+    <div class="card-grid">
+      <div class="card" style="margin:0;">
+        <div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;margin-bottom:8px;">Frontend</div>
+        <div style="font-size:13px;line-height:2;">React 18 + Vite<br>TailwindCSS (utilidades)<br>theme.css (design tokens)<br>React Router DOM v6<br>Zustand · React Query</div>
+      </div>
+      <div class="card" style="margin:0;">
+        <div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;margin-bottom:8px;">Backend</div>
+        <div style="font-size:13px;line-height:2;">Supabase PostgreSQL<br>Supabase Auth + RLS<br>Supabase Storage<br>Netlify Functions (proxy IA)<br>Claude API (Vision + Chat)</div>
+      </div>
+      <div class="card" style="margin:0;">
+        <div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;margin-bottom:8px;">Ambientes</div>
+        <div style="font-size:13px;line-height:2;">master → PROD (Netlify)<br>develop → QA (Netlify)<br>VITE_AMBIENTE = 'QA' | 'PRODUCCION'<br>Badge QA en header cuando QA<br>Supabase separado por ambiente</div>
+      </div>
+    </div>
+  </section>
+
+</main>
+</div>
+
+<script>
+  const links = document.querySelectorAll('.nav-link')
+  const sections = document.querySelectorAll('section[id]')
+  const obs = new IntersectionObserver(entries => {
+    entries.forEach(e => {
+      if (e.isIntersecting) {
+        links.forEach(l => l.classList.remove('active'))
+        const a = document.querySelector(`.nav-link[href="#${e.target.id}"]`)
+        if (a) a.classList.add('active')
+      }
+    })
+  }, { rootMargin: '-20% 0px -70% 0px' })
+  sections.forEach(s => obs.observe(s))
+  links.forEach(l => l.addEventListener('click', e => {
+    e.preventDefault()
+    document.querySelector(l.getAttribute('href'))?.scrollIntoView({ behavior: 'smooth' })
+  }))
+  document.querySelectorAll('.demo-chip').forEach(c => {
+    c.addEventListener('click', () => {
+      c.closest('.demo-chips').querySelectorAll('.demo-chip').forEach(x => x.classList.remove('on'))
+      c.classList.add('on')
+    })
+  })
+  document.querySelectorAll('.demo-toggle button').forEach(b => {
+    b.addEventListener('click', () => {
+      b.closest('.demo-toggle').querySelectorAll('button').forEach(x => x.classList.remove('on'))
+      b.classList.add('on')
+    })
+  })
+</script>

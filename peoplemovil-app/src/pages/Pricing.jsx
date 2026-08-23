@@ -1,5 +1,6 @@
 import React from 'react';
 import { PLANES } from '../lib/plan.js';
+import { useModuleAudit } from '../lib/audit.js';
 
 const CARDS = [
   {
@@ -38,31 +39,33 @@ const CARDS = [
 ];
 
 export default function Pricing() {
+  useModuleAudit('pricing');
   return (
     <div>
-      <div className="text-center max-w-2xl mx-auto">
-        <h1 className="text-2xl font-bold">Planes que se ajustan al tamaño del negocio</h1>
-        <p className="mt-2 text-sm text-slate-600">
-          Los límites viven en catálogo, no en código. Cambiar de plan es cambiar una fila en <code>suscripciones</code>.
-        </p>
-      </div>
-      <div className="mt-8 grid grid-cols-1 md:grid-cols-2 gap-6">
+      <div className="section-eyebrow">Suscripción</div>
+      <h1>Planes de PeopleMovil</h1>
+      <p style={{ color: 'var(--muted)', marginBottom: 24 }}>Los límites viven en catálogo (<code>tc_planes_suscripcion</code>), no en código. Cambiar de plan es cambiar una fila en <code>te_suscripciones</code>.</p>
+
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: 20 }}>
         {CARDS.map(c => (
-          <div key={c.plan.codigo} className={'card p-6 ' + (c.highlight ? 'ring-2 ring-brand-600' : '')}>
-            <div className="flex items-baseline justify-between">
-              <h2 className="text-xl font-bold">{c.plan.titulo}</h2>
-              <div className="text-right">
-                <span className="text-3xl font-bold">${c.plan.precio_mensual_mxn.toLocaleString('es-MX')}</span>
-                <span className="text-xs text-slate-500"> MXN/mes</span>
+          <div key={c.plan.codigo} className="card" style={{ margin: 0, borderColor: c.highlight ? 'var(--accent)' : undefined, borderWidth: c.highlight ? 2 : 1 }}>
+            <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', marginBottom: 6 }}>
+              <h2 style={{ margin: 0 }}>{c.plan.titulo}</h2>
+              <div style={{ textAlign: 'right' }}>
+                <span style={{ fontSize: 28, fontWeight: 900, color: 'var(--accent)' }}>${c.plan.precio_mensual_mxn.toLocaleString('es-MX')}</span>
+                <span style={{ fontSize: 11, color: 'var(--muted)' }}> MXN/mes</span>
               </div>
             </div>
-            <p className="mt-2 text-sm text-slate-600">{c.tagline}</p>
-            <ul className="mt-6 space-y-2 text-sm">
+            <p style={{ color: 'var(--muted)', fontSize: 13, marginBottom: 16 }}>{c.tagline}</p>
+            <ul style={{ listStyle: 'none', display: 'grid', gap: 8, fontSize: 13 }}>
               {c.features.map(f => (
-                <li key={f} className="flex gap-2"><span className="text-emerald-600 shrink-0">✓</span><span>{f}</span></li>
+                <li key={f} style={{ display: 'flex', gap: 8 }}>
+                  <span style={{ color: 'var(--green)', fontWeight: 900 }}>✓</span>
+                  <span>{f}</span>
+                </li>
               ))}
             </ul>
-            <button className={'mt-6 w-full ' + (c.highlight ? 'btn-primary justify-center' : 'btn-ghost justify-center border border-slate-300')}>{c.cta}</button>
+            <button className={'btn ' + (c.highlight ? '' : 'outline')} style={{ marginTop: 20, width: '100%', justifyContent: 'center' }}>{c.cta}</button>
           </div>
         ))}
       </div>

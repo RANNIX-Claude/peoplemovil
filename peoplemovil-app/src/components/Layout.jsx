@@ -1,45 +1,51 @@
-import React from 'react';
+import React, { useState } from 'react';
 
-export default function Layout({ tabs, active, onSelect, children }) {
+// Sidebar RANNIX: agrupado por Visual/Patrones/Funciones/Reglas.
+// Adaptado a PeopleMovil como: Operación / Personal / Config / Utilerías.
+export default function Layout({ secciones, active, onSelect, children }) {
+  const [openMobile, setOpenMobile] = useState(false);
+  const ambiente = import.meta.env.VITE_AMBIENTE;
+
   return (
-    <div className="min-h-screen bg-slate-50">
-      <header className="border-b border-slate-200 bg-white sticky top-0 z-10">
-        <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
-          <div className="flex items-center justify-between py-4">
-            <div className="flex items-center gap-3">
-              <img src="/favicon.svg" alt="" className="h-8 w-8" />
-              <div>
-                <h1 className="text-lg font-bold text-slate-900">PeopleMovil</h1>
-                <p className="text-xs text-slate-500">Gestión de personal rotativo · Reforma LFT 2026-2027</p>
-              </div>
-            </div>
-            <div className="hidden sm:flex items-center gap-2 text-xs text-slate-500">
-              <span className="tag bg-emerald-100 text-emerald-800">Plan PRO</span>
-              <span>Tenant demo</span>
+    <div className="app-layout">
+      <aside className={'sidebar' + (openMobile ? ' open' : '')}>
+        <div className="sidebar-logo">
+          <div className="brand">
+            <div className="brand-icon">P</div>
+            <div>
+              <div className="brand-name">PeopleMovil</div>
+              <div className="brand-sub">RANNIX Consulting</div>
             </div>
           </div>
-          <nav className="flex gap-1 overflow-x-auto -mb-px pb-1">
-            {tabs.map(t => (
+        </div>
+        {secciones.map(grupo => (
+          <React.Fragment key={grupo.titulo}>
+            <div className="nav-section">{grupo.titulo}</div>
+            {grupo.items.map(item => (
               <button
-                key={t.id}
-                onClick={() => onSelect(t.id)}
-                className={
-                  'whitespace-nowrap rounded-t-md px-3 py-2 text-sm font-medium border-b-2 transition ' +
-                  (active === t.id
-                    ? 'border-brand-600 text-brand-700 bg-brand-50'
-                    : 'border-transparent text-slate-600 hover:text-slate-900 hover:bg-slate-100')
-                }
+                key={item.id}
+                className={'nav-link' + (active === item.id ? ' active' : '')}
+                onClick={() => { onSelect(item.id); setOpenMobile(false); }}
               >
-                {t.label}
+                {item.label}
               </button>
             ))}
-          </nav>
+          </React.Fragment>
+        ))}
+      </aside>
+      <div className={'sidebar-scrim' + (openMobile ? ' open' : '')} onClick={() => setOpenMobile(false)} />
+
+      <main className="app-content">
+        <div className="topbar">
+          <button className="btn ghost mobile-menu-btn" onClick={() => setOpenMobile(true)}>☰ Menú</button>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+            <span style={{ fontSize: 12, color: 'var(--muted)', fontWeight: 700 }}>Tenant demo</span>
+            <span className="badge proceso">PLAN PRO</span>
+            {ambiente && ambiente !== 'PRODUCCION' && <span className="env-badge">{ambiente}</span>}
+          </div>
         </div>
-      </header>
-      <main className="mx-auto max-w-7xl px-4 py-6 sm:px-6 lg:px-8">{children}</main>
-      <footer className="mx-auto max-w-7xl px-4 py-6 text-xs text-slate-400 text-center">
-        PeopleMovil · Multi-tenant · RLS activo · Registros append-only
-      </footer>
+        {children}
+      </main>
     </div>
   );
 }

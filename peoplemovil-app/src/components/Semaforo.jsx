@@ -1,18 +1,15 @@
 import React from 'react';
 
-// Heredado del sistema Lobo: verde >80% cobertura, ámbar 60-80%, rojo <60%
+// Verde ≥ 80% · Ámbar 60-80% · Rojo < 60% (heredado del sistema Lobo).
 export default function Semaforo({ porcentaje, label }) {
   const p = Number(porcentaje) || 0;
-  const bg = p >= 0.8 ? 'bg-emerald-500' : p >= 0.6 ? 'bg-amber-500' : 'bg-rose-500';
-  const bgL = p >= 0.8 ? 'bg-emerald-100 text-emerald-800' : p >= 0.6 ? 'bg-amber-100 text-amber-800' : 'bg-rose-100 text-rose-800';
+  const cls = p >= 0.8 ? 'g' : p >= 0.6 ? 'y' : 'r';
   const pct = Math.round(p * 100);
   return (
-    <div className="flex items-center gap-2">
-      <div className="h-2 flex-1 rounded-full bg-slate-200 overflow-hidden">
-        <div className={`h-full ${bg}`} style={{ width: `${pct}%` }} />
-      </div>
-      <span className={`tag ${bgL} tabular-nums`}>{pct}%</span>
-      {label && <span className="text-xs text-slate-500">{label}</span>}
+    <div className="semaforo">
+      <div className="semaforo-bar"><div className={'semaforo-fill ' + cls} style={{ width: pct + '%' }} /></div>
+      <span className={'semaforo-pct ' + cls}>{pct}%</span>
+      {label && <span style={{ fontSize: 11, color: 'var(--muted)' }}>{label}</span>}
     </div>
   );
 }

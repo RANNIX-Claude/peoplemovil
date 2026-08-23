@@ -1,7 +1,8 @@
 import React from 'react';
 import ReactDOM from 'react-dom/client';
+import './styles/theme.css';   // design tokens + componentes RANNIX (debe ir antes de Tailwind)
+import './index.css';           // solo @tailwind base/components/utilities
 import App from './App.jsx';
-import './index.css';
 
 ReactDOM.createRoot(document.getElementById('root')).render(
   <React.StrictMode>

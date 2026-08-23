@@ -1,14 +1,22 @@
 import React, { useEffect, useState } from 'react';
+import Modal from '../components/ui/Modal.jsx';
+import TablaWrap from '../components/ui/TablaWrap.jsx';
+import Badge from '../components/ui/Badge.jsx';
+import KpiCard from '../components/ui/KpiCard.jsx';
 import { supabase, supabaseReady, DEMO_TENANT_ID } from '../lib/supabase.js';
+import { useModuleAudit, logAccion } from '../lib/audit.js';
+
+const fmt = n => '$' + Number(n || 0).toLocaleString('es-MX', { minimumFractionDigits: 2 });
 
 export default function Nomina() {
+  useModuleAudit('nomina');
   const [periodos, setPeriodos] = useState([]);
   const [detalle, setDetalle] = useState([]);
   const [precauciones, setPrec] = useState([]);
   const [seleccion, setSel] = useState(null);
+  const [detalleModal, setDetalleModal] = useState(null);
   const [msg, setMsg] = useState('');
 
-  useEffect(() => { cargar(); }, []);
   async function cargar() {
     if (!supabaseReady) return;
     const [{ data: p }, { data: prec }] = await Promise.all([
@@ -17,6 +25,7 @@ export default function Nomina() {
     ]);
     setPeriodos(p || []); setPrec(prec || []);
   }
+  useEffect(() => { cargar(); }, []);
 
   async function verDetalle(nom) {
     setSel(nom);
@@ -27,84 +36,123 @@ export default function Nomina() {
   async function calcular(nom) {
     const { error, data } = await supabase.rpc('calcular_nomina_periodo', { p_nomina: nom.id });
     setMsg(error ? 'Error: ' + error.message : 'Calculado, ' + data + ' empleados');
+    await logAccion('nomina', 'CALCULAR', `periodo ${nom.fecha_desde} → ${nom.fecha_hasta}: ${data || 0} empleados`);
     verDetalle(nom);
   }
 
-  return (
-    <div className="space-y-6">
-      <section className="card p-4">
-        <h2 className="text-sm font-semibold mb-3">Precauciones antes de cierre (PRC_ReportePrecaucionesNomina)</h2>
-        {precauciones.length === 0
-          ? <p className="text-xs text-slate-500">Sin precauciones. Todo el personal está listo para dispersión.</p>
-          : <ul className="text-xs divide-y">{precauciones.map(p => (
-              <li key={p.empleado_id} className="py-2 flex justify-between">
-                <span className="font-medium">{p.nombre}</span>
-                <span className="text-rose-700">{(p.motivos || []).join(', ')}</span>
-              </li>
-            ))}</ul>}
-      </section>
+  const kpiPeriodosAbiertos = periodos.filter(p => !p.cerrada).length;
+  const kpiPrecauciones     = precauciones.length;
+  const kpiEmpleadosPeriodo = detalle.length;
+  const kpiMontoTotal       = detalle.reduce((s, d) => s + Number(d.monto_neto || 0), 0);
 
-      <section className="card overflow-x-auto">
-        <div className="p-3 border-b text-sm font-semibold">Periodos de nómina</div>
-        <table className="min-w-full text-sm">
-          <thead className="bg-slate-50 text-xs uppercase text-slate-500">
-            <tr>
-              <th className="px-4 py-2 text-left">Ciclo</th>
-              <th className="px-4 py-2 text-left">Desde</th>
-              <th className="px-4 py-2 text-left">Hasta</th>
-              <th className="px-4 py-2 text-left">Estado</th>
-              <th></th>
-            </tr>
+  return (
+    <div>
+      <div className="section-eyebrow">Fiscal</div>
+      <h1>Nómina</h1>
+      <p style={{ color: 'var(--muted)', marginBottom: 24 }}>Cálculo por asistencia real (asistencia + retardo + falta). Precauciones bloquean dispersión hasta resolverlas.</p>
+
+      <div className="kpi-grid">
+        <KpiCard label="Periodos abiertos"  value={kpiPeriodosAbiertos} sub={`${periodos.length} totales`} />
+        <KpiCard label="Precauciones"       value={kpiPrecauciones}     color={kpiPrecauciones ? 'var(--red)' : 'var(--green)'} sub="antes de cerrar" />
+        <KpiCard label="Empleados periodo"  value={kpiEmpleadosPeriodo} sub={seleccion ? `${seleccion.fecha_desde} → ${seleccion.fecha_hasta}` : 'sin selección'} />
+        <KpiCard label="Monto neto periodo" value={fmt(kpiMontoTotal)}  sub="suma de la selección" color="var(--accent2)" />
+      </div>
+
+      <div className="card">
+        <div className="section-eyebrow">Precauciones antes de cierre</div>
+        <h3 style={{ marginTop: 4 }}>PRC_ReportePrecaucionesNomina</h3>
+        {precauciones.length === 0
+          ? <p style={{ fontSize: 12, color: 'var(--muted)' }}>Sin precauciones. Todo el personal está listo para dispersión.</p>
+          : <ul style={{ listStyle: 'none', fontSize: 12 }}>
+              {precauciones.map(p => (
+                <li key={p.empleado_id} style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 0', borderBottom: '1px solid var(--border)' }}>
+                  <span style={{ fontWeight: 700 }}>{p.nombre}</span>
+                  <span>{(p.motivos || []).map((m, i) => <Badge key={i} estado="vencido">{m}</Badge>)}</span>
+                </li>
+              ))}
+            </ul>}
+      </div>
+
+      <h3>Periodos de nómina</h3>
+      <TablaWrap>
+        <table>
+          <thead>
+            <tr><th>Ciclo</th><th>Desde</th><th>Hasta</th><th>Estado</th><th></th></tr>
           </thead>
-          <tbody className="divide-y divide-slate-100">
+          <tbody>
+            {periodos.length === 0 && <tr><td colSpan="5" className="empty">Sin periodos aún. Crear uno desde configuración.</td></tr>}
             {periodos.map(p => (
               <tr key={p.id}>
-                <td className="px-4 py-2">{p.ciclo_pago}</td>
-                <td className="px-4 py-2">{p.fecha_desde}</td>
-                <td className="px-4 py-2">{p.fecha_hasta}</td>
-                <td className="px-4 py-2"><span className={'tag ' + (p.cerrada ? 'bg-slate-100 text-slate-600' : 'bg-amber-100 text-amber-800')}>{p.cerrada ? 'Cerrada' : 'Abierta'}</span></td>
-                <td className="px-4 py-2 text-right space-x-2">
-                  <button className="btn-ghost" onClick={() => verDetalle(p)}>Ver</button>
-                  {!p.cerrada && <button className="btn-primary" onClick={() => calcular(p)}>Calcular</button>}
+                <td>{p.ciclo_pago}</td>
+                <td>{p.fecha_desde}</td>
+                <td>{p.fecha_hasta}</td>
+                <td><Badge estado={p.cerrada ? 'inactivo' : 'pendiente'}>{p.cerrada ? 'CERRADA' : 'ABIERTA'}</Badge></td>
+                <td style={{ textAlign: 'right' }}>
+                  <button className="btn ghost sm" onClick={() => verDetalle(p)}>Ver</button>
+                  {!p.cerrada && <button className="btn green sm" style={{ marginLeft: 6 }} onClick={() => calcular(p)}>Calcular</button>}
                 </td>
               </tr>
             ))}
-            {!periodos.length && <tr><td colSpan="5" className="p-6 text-center text-slate-500 text-xs">Sin periodos aún. Crear uno desde configuración.</td></tr>}
           </tbody>
         </table>
-      </section>
+      </TablaWrap>
 
       {seleccion && (
-        <section className="card overflow-x-auto">
-          <div className="p-3 border-b text-sm font-semibold">Detalle del periodo {seleccion.fecha_desde} → {seleccion.fecha_hasta}</div>
-          <table className="min-w-full text-sm">
-            <thead className="bg-slate-50 text-xs uppercase text-slate-500">
-              <tr>
-                <th className="px-4 py-2 text-left">Empleado</th>
-                <th className="px-4 py-2 text-right">Turnos</th>
-                <th className="px-4 py-2 text-right">Bruto</th>
-                <th className="px-4 py-2 text-right">Penal.</th>
-                <th className="px-4 py-2 text-right">Neto</th>
-                <th className="px-4 py-2 text-left">Régimen</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-100">
-              {detalle.map(d => (
-                <tr key={d.id}>
-                  <td className="px-4 py-2 font-mono text-xs">{d.empleado_id.slice(0, 8)}…</td>
-                  <td className="px-4 py-2 text-right tabular-nums">{d.reservaciones_cnt}</td>
-                  <td className="px-4 py-2 text-right tabular-nums">${d.monto_bruto}</td>
-                  <td className="px-4 py-2 text-right tabular-nums">${d.penalizaciones_aplicadas}</td>
-                  <td className="px-4 py-2 text-right tabular-nums font-semibold">${d.monto_neto}</td>
-                  <td className="px-4 py-2 text-xs">{d.regimen_pago}</td>
-                </tr>
-              ))}
-              {!detalle.length && <tr><td colSpan="6" className="p-6 text-center text-slate-500 text-xs">Sin detalle. Presiona Calcular.</td></tr>}
-            </tbody>
-          </table>
-        </section>
+        <>
+          <h3>Detalle del periodo {seleccion.fecha_desde} → {seleccion.fecha_hasta}</h3>
+          <TablaWrap>
+            <table>
+              <thead>
+                <tr><th>Empleado</th><th style={{ textAlign: 'right' }}>Turnos</th><th style={{ textAlign: 'right' }}>Bruto</th>
+                    <th style={{ textAlign: 'right' }}>Penal.</th><th style={{ textAlign: 'right' }}>Neto</th><th>Régimen</th></tr>
+              </thead>
+              <tbody>
+                {detalle.length === 0 && <tr><td colSpan="6" className="empty">Sin detalle. Presiona "Calcular" en el periodo.</td></tr>}
+                {detalle.map(d => (
+                  <tr key={d.id} className="clickable" onClick={() => setDetalleModal(d)}>
+                    <td className="mono">{d.empleado_id.slice(0, 8)}…</td>
+                    <td style={{ textAlign: 'right' }}>{d.reservaciones_cnt}</td>
+                    <td style={{ textAlign: 'right' }}>{fmt(d.monto_bruto)}</td>
+                    <td style={{ textAlign: 'right' }}>{fmt(d.penalizaciones_aplicadas)}</td>
+                    <td style={{ textAlign: 'right', fontWeight: 800 }}>{fmt(d.monto_neto)}</td>
+                    <td style={{ fontSize: 12 }}>{d.regimen_pago}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </TablaWrap>
+        </>
       )}
-      {msg && <p className="text-xs text-slate-600">{msg}</p>}
+
+      {msg && <p style={{ fontSize: 12, color: 'var(--muted)' }}>{msg}</p>}
+
+      <Modal open={!!detalleModal} onClose={() => setDetalleModal(null)} title="Detalle de nómina por empleado">
+        {detalleModal && (
+          <div style={{ display: 'grid', gap: 10, fontSize: 13 }}>
+            <div><div className="label">Empleado (id)</div><div className="mono">{detalleModal.empleado_id}</div></div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+              <div><div className="label">Turnos</div><div>{detalleModal.reservaciones_cnt}</div></div>
+              <div><div className="label">Régimen</div><div>{detalleModal.regimen_pago}</div></div>
+              <div><div className="label">Bruto</div><div>{fmt(detalleModal.monto_bruto)}</div></div>
+              <div><div className="label">Penalizaciones</div><div>{fmt(detalleModal.penalizaciones_aplicadas)}</div></div>
+              <div><div className="label">Extras</div><div>{fmt(detalleModal.extras_aplicados)}</div></div>
+              <div><div className="label">Pensión</div><div>{fmt(detalleModal.pension_aplicada)}</div></div>
+              <div><div className="label">Salario diario prom.</div><div>{fmt(detalleModal.salario_diario_promedio)}</div></div>
+              <div><div className="label">Neto</div><div style={{ fontWeight: 900 }}>{fmt(detalleModal.monto_neto)}</div></div>
+            </div>
+            {detalleModal.precauciones && Object.values(detalleModal.precauciones).some(Boolean) && (
+              <div>
+                <div className="label">Precauciones</div>
+                <div>
+                  {detalleModal.precauciones.sin_banco    && <Badge estado="vencido">SIN BANCO</Badge>}{' '}
+                  {detalleModal.precauciones.sin_clabe    && <Badge estado="vencido">SIN CLABE</Badge>}{' '}
+                  {detalleModal.precauciones.sin_pagadora && <Badge estado="vencido">SIN PAGADORA</Badge>}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+      </Modal>
     </div>
   );
 }
