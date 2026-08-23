@@ -76,10 +76,23 @@ CREATE TYPE plan_codigo_enum AS ENUM ('FREE', 'PRO');
 -- 2. Helpers de sesión y auditoría
 -- ---------------------------------------------------------------------------
 
--- Cada request de Supabase define app.current_tenant vía SET LOCAL o via JWT claim.
+-- Cada request de Supabase define el tenant activo por uno de estos caminos:
+--   1. SET LOCAL app.current_tenant = '…'  (backend/tests que hacen SQL directo)
+--   2. Header x-tenant-id en la request de PostgREST (frontend con el anon key)
+--   3. Claim `sub` del JWT (una vez que el tenant se persista en el JWT)
 CREATE OR REPLACE FUNCTION current_tenant_id() RETURNS uuid AS $$
+DECLARE h_tenant text;
 BEGIN
-  RETURN NULLIF(current_setting('app.current_tenant', true), '')::uuid;
+  BEGIN
+    h_tenant := current_setting('request.headers', true)::json->>'x-tenant-id';
+  EXCEPTION WHEN OTHERS THEN
+    h_tenant := NULL;
+  END;
+  RETURN COALESCE(
+    NULLIF(current_setting('app.current_tenant', true), '')::uuid,
+    h_tenant::uuid,
+    NULLIF(current_setting('request.jwt.claim.sub', true), '')::uuid
+  );
 EXCEPTION WHEN OTHERS THEN
   RETURN NULL;
 END $$ LANGUAGE plpgsql STABLE;
@@ -1298,3 +1311,18 @@ INSERT INTO cat_bancos (tenant_id, clave, nombre) VALUES ('00000000-0000-0000-00
 INSERT INTO cat_bancos (tenant_id, clave, nombre) VALUES ('00000000-0000-0000-0000-000000000001', '646', 'STP');
 
 -- fin ---
+
+
+-- ---------------------------------------------------------------------------
+-- 11. Grants para roles Supabase (anon, authenticated, service_role)
+-- El DROP SCHEMA public CASCADE del inicio se lleva los grants estándar de
+-- Supabase; hay que reponerlos para que PostgREST pueda leer/escribir.
+-- RLS sigue filtrando por tenant_id.
+-- ---------------------------------------------------------------------------
+GRANT USAGE ON SCHEMA public TO anon, authenticated, service_role;
+GRANT ALL ON ALL TABLES    IN SCHEMA public TO anon, authenticated, service_role;
+GRANT ALL ON ALL SEQUENCES IN SCHEMA public TO anon, authenticated, service_role;
+GRANT ALL ON ALL FUNCTIONS IN SCHEMA public TO anon, authenticated, service_role;
+ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON TABLES    TO anon, authenticated, service_role;
+ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON SEQUENCES TO anon, authenticated, service_role;
+ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON FUNCTIONS TO anon, authenticated, service_role;
