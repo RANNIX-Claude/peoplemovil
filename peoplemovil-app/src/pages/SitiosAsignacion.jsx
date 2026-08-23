@@ -11,8 +11,8 @@ export default function SitiosAsignacion() {
   async function cargar() {
     if (!supabaseReady) return;
     const [{ data: s }, { data: p }] = await Promise.all([
-      supabase.from('cat_sitios').select('id, titulo, tipo_sitio, direccion_abreviada, activo').order('titulo'),
-      supabase.from('pedidos').select('id, folio, titulo, fecha_evento, status').order('fecha_evento', { ascending: false }).limit(50)
+      supabase.from('tc_sitios').select('id, titulo, tipo_sitio, direccion_abreviada, activo').order('titulo'),
+      supabase.from('te_pedidos').select('id, folio, titulo, fecha_evento, status').order('fecha_evento', { ascending: false }).limit(50)
     ]);
     setSitios(s || []); setPedidos(p || []);
   }
@@ -20,7 +20,7 @@ export default function SitiosAsignacion() {
 
   async function altaSitio(e) {
     e.preventDefault();
-    const { error } = await supabase.from('cat_sitios').insert({ ...nuevoSitio, tenant_id: DEMO_TENANT_ID });
+    const { error } = await supabase.from('tc_sitios').insert({ ...nuevoSitio, tenant_id: DEMO_TENANT_ID });
     if (error) { setMsg('Rechazado por la base: ' + error.message); return; }
     setNuevoSitio({ titulo: '', tipo_sitio: 'sucursal', direccion: '' });
     setMsg('Sitio creado');

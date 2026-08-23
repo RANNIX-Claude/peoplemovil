@@ -12,7 +12,7 @@ export default function Nomina() {
   async function cargar() {
     if (!supabaseReady) return;
     const [{ data: p }, { data: prec }] = await Promise.all([
-      supabase.from('nominas_periodo').select('*').order('fecha_desde', { ascending: false }),
+      supabase.from('te_nominas_periodo').select('*').order('fecha_desde', { ascending: false }),
       supabase.rpc('reporte_precauciones_nomina', { p_tenant: DEMO_TENANT_ID })
     ]);
     setPeriodos(p || []); setPrec(prec || []);
@@ -20,7 +20,7 @@ export default function Nomina() {
 
   async function verDetalle(nom) {
     setSel(nom);
-    const { data } = await supabase.from('nomina_detalle').select('*').eq('nomina_id', nom.id);
+    const { data } = await supabase.from('te_nomina_detalle').select('*').eq('nomina_id', nom.id);
     setDetalle(data || []);
   }
 

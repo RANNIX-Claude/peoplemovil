@@ -12,8 +12,8 @@ export default function Dashboard() {
     if (!supabaseReady) return;
     (async () => {
       const [{ count: s }, { count: e }, { data: cob }] = await Promise.all([
-        supabase.from('cat_sitios').select('*', { count: 'exact', head: true }).eq('activo', true),
-        supabase.from('empleados').select('*', { count: 'exact', head: true }).eq('activo', true),
+        supabase.from('tc_sitios').select('*', { count: 'exact', head: true }).eq('activo', true),
+        supabase.from('te_empleados').select('*', { count: 'exact', head: true }).eq('activo', true),
         supabase.rpc('reporte_precauciones_nomina', { p_tenant: '00000000-0000-0000-0000-000000000001' })
       ]);
       setKpis(k => ({ ...k, sitios: s || 0, empleados: e || 0 }));

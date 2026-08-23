@@ -10,14 +10,14 @@ export default function Configuracion() {
   async function cargar() {
     if (!supabaseReady) return;
     const [{ data: p }, { data: ps }] = await Promise.all([
-      supabase.from('cat_parametros_globales').select('*').eq('tenant_id', DEMO_TENANT_ID).maybeSingle(),
-      supabase.from('cat_puestos').select('id, titulo, porcentaje_certeza_inicial, porcentaje_minimo, horas_entre_turnos, horas_antes_cancelar, penalizacion_retardo, penalizacion_falta').order('titulo').limit(50)
+      supabase.from('tp_parametros_globales').select('*').eq('tenant_id', DEMO_TENANT_ID).maybeSingle(),
+      supabase.from('tc_puestos').select('id, titulo, porcentaje_certeza_inicial, porcentaje_minimo, horas_entre_turnos, horas_antes_cancelar, penalizacion_retardo, penalizacion_falta').order('titulo').limit(50)
     ]);
     setParams(p); setPuestos(ps || []);
   }
 
   async function guardarParams() {
-    const { error } = await supabase.from('cat_parametros_globales').update(params).eq('tenant_id', DEMO_TENANT_ID);
+    const { error } = await supabase.from('tp_parametros_globales').update(params).eq('tenant_id', DEMO_TENANT_ID);
     setMsg(error ? 'Error: ' + error.message : 'Guardado');
   }
 
@@ -49,7 +49,7 @@ export default function Configuracion() {
       </section>
 
       <section className="card overflow-x-auto">
-        <div className="p-3 border-b text-sm font-semibold">Parámetros por puesto (cat_puestos)</div>
+        <div className="p-3 border-b text-sm font-semibold">Parámetros por puesto (tc_puestos)</div>
         <table className="min-w-full text-sm">
           <thead className="bg-slate-50 text-xs uppercase text-slate-500">
             <tr>

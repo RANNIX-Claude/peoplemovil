@@ -11,8 +11,8 @@ export default function Personal() {
   async function cargar() {
     if (!supabaseReady) return;
     const [{ data: e }, { data: c }] = await Promise.all([
-      supabase.from('empleados').select('id, folio, nombres, apellido_paterno, activo, regimen_pago').order('folio'),
-      supabase.from('candidatos').select('id, nombres, apellido_paterno, paso_induccion, promovido_a_empleado').order('created_at', { ascending: false })
+      supabase.from('te_empleados').select('id, folio, nombres, apellido_paterno, activo, regimen_pago').order('folio'),
+      supabase.from('te_candidatos').select('id, nombres, apellido_paterno, paso_induccion, promovido_a_empleado').order('creado_en', { ascending: false })
     ]);
     setEmpleados(e || []); setCandidatos(c || []);
   }
@@ -21,7 +21,7 @@ export default function Personal() {
   async function altaCand(e) {
     e.preventDefault();
     if (!supabaseReady) { setMsg('Configurá VITE_SUPABASE_URL/KEY para persistir'); return; }
-    const { error } = await supabase.from('candidatos').insert({ ...nuevoCand, tenant_id: DEMO_TENANT_ID });
+    const { error } = await supabase.from('te_candidatos').insert({ ...nuevoCand, tenant_id: DEMO_TENANT_ID });
     if (error) { setMsg('Error: ' + error.message); return; }
     setNuevoCand({ nombres: '', apellido_paterno: '', rfc: '', curp: '', sexo: 'M' });
     setMsg('Candidato dado de alta');

@@ -13,8 +13,8 @@ export default function Checador() {
     if (!supabaseReady) return;
     (async () => {
       const [{ data: emp }, { data: hist }] = await Promise.all([
-        supabase.from('empleados').select('id, folio, nombres, apellido_paterno').eq('activo', true).order('folio'),
-        supabase.from('eventos_biometricos').select('id, ts_servidor, tipo_marcaje, empleado_id, medio_asistencia').order('ts_servidor', { ascending: false }).limit(30)
+        supabase.from('te_empleados').select('id, folio, nombres, apellido_paterno').eq('activo', true).order('folio'),
+        supabase.from('te_eventos_biometricos').select('id, ts_servidor, tipo_marcaje, empleado_id, medio_asistencia').order('ts_servidor', { ascending: false }).limit(30)
       ]);
       setEmpleados(emp || []); setHistorial(hist || []);
     })();
@@ -31,7 +31,7 @@ export default function Checador() {
 
   async function checar() {
     if (!seleccion.empleado_id) { setMsg('Elegí un empleado'); return; }
-    const { data: disp } = await supabase.from('dispositivos_biometricos').select('id, consentimiento_id').eq('numero_serie', seleccion.dispositivo_serie).maybeSingle();
+    const { data: disp } = await supabase.from('tc_dispositivos').select('id, consentimiento_id').eq('numero_serie', seleccion.dispositivo_serie).maybeSingle();
     const payload = {
       tenant_id: DEMO_TENANT_ID,
       empleado_id: seleccion.empleado_id,
@@ -44,10 +44,10 @@ export default function Checador() {
       // consentimiento_id lo fuerza el trigger tg_evbio_valida con consentimiento_vigente()
       consentimiento_id: '00000000-0000-0000-0000-000000000000'
     };
-    const { error } = await supabase.from('eventos_biometricos').insert(payload);
+    const { error } = await supabase.from('te_eventos_biometricos').insert(payload);
     if (error) { setMsg('Rechazado: ' + error.message); return; }
     setMsg('Marcaje registrado');
-    const { data: hist } = await supabase.from('eventos_biometricos').select('id, ts_servidor, tipo_marcaje, empleado_id, medio_asistencia').order('ts_servidor', { ascending: false }).limit(30);
+    const { data: hist } = await supabase.from('te_eventos_biometricos').select('id, ts_servidor, tipo_marcaje, empleado_id, medio_asistencia').order('ts_servidor', { ascending: false }).limit(30);
     setHistorial(hist || []);
   }
 
