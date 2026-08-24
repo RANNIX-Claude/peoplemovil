@@ -3,22 +3,33 @@ import { NavLink, Outlet } from 'react-router-dom';
 
 const SECCIONES = [
   { titulo: 'Operación', items: [
-    { path: '/admin/dashboard',     label: 'Dashboard' },
-    { path: '/admin/sitios',        label: 'Sitios y Asignación' },
-    { path: '/admin/checador',      label: 'Checador' },
-    { path: '/admin/nomina',        label: 'Nómina' }
+    { path: '/admin/dashboard',      label: 'Dashboard' },
+    { path: '/admin/sitios',         label: 'Pedidos y sitios' },
+    { path: '/admin/arbol',          label: 'Árbol de reservaciones' },
+    { path: '/admin/preasignacion',  label: 'Pre-asignación' },
+    { path: '/admin/asistencia',     label: 'Confirmación asistencia' },
+    { path: '/admin/checador',       label: 'Checador biométrico' },
+    { path: '/admin/nomina',         label: 'Nómina' }
   ]},
   { titulo: 'Comercial', items: [
     { path: '/admin/requisiciones', label: 'Requisiciones de personal' },
     { path: '/admin/facturacion',   label: 'Facturación' }
   ]},
   { titulo: 'Reclutamiento', items: [
-    { path: '/admin/personal',      label: 'Empleados y candidatos' },
-    { path: '/admin/funnel',        label: 'Funnel de reclutamiento' }
+    { path: '/admin/personal',                label: 'Empleados y candidatos' },
+    { path: '/admin/funnel',                  label: 'Funnel de selección' },
+    { path: '/admin/calendario-entrevistas',  label: 'Calendario entrevistas' },
+    { path: '/admin/alta-masiva',             label: 'Alta masiva empleados' }
+  ]},
+  { titulo: 'Analítica', items: [
+    { path: '/admin/dw',            label: 'Data Warehouse' }
   ]},
   { titulo: 'Administración', items: [
+    { path: '/admin/catalogos',     label: 'Catálogos (HU 9.01)' },
+    { path: '/admin/usuarios',      label: 'Usuarios y roles (HU 9.03)' },
     { path: '/admin/config',        label: 'Configuración' },
-    { path: '/admin/pricing',       label: 'Pricing' }
+    { path: '/admin/suscripcion',   label: 'Mi suscripción' },
+    { path: '/admin/pricing',       label: 'Pricing público' }
   ]},
   { titulo: 'Soporte / Dev', items: [
     { path: '/admin/utilerias',     label: 'Utilerías (explorador)' },

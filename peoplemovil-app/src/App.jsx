@@ -15,6 +15,15 @@ import Bitacora from './pages/Bitacora.jsx';
 import Requisiciones from './pages/admin/Requisiciones.jsx';
 import Facturacion from './pages/admin/Facturacion.jsx';
 import FunnelReclutamiento from './pages/admin/FunnelReclutamiento.jsx';
+import DataWarehouse from './pages/admin/DataWarehouse.jsx';
+import Suscripcion from './pages/admin/Suscripcion.jsx';
+import CatalogosAdmin from './pages/admin/CatalogosAdmin.jsx';
+import UsuariosRoles from './pages/admin/UsuariosRoles.jsx';
+import ArbolReservaciones from './pages/admin/ArbolReservaciones.jsx';
+import Preasignacion from './pages/admin/Preasignacion.jsx';
+import ConfirmacionAsistencia from './pages/admin/ConfirmacionAsistencia.jsx';
+import CalendarioEntrevistas from './pages/admin/CalendarioEntrevistas.jsx';
+import AltaMasivaEmpleados from './pages/admin/AltaMasivaEmpleados.jsx';
 
 // Portal público candidatos
 import PublicShell from './components/public/PublicShell.jsx';
@@ -34,27 +43,33 @@ export default function App() {
   return (
     <BrowserRouter>
       <Routes>
-        {/* Root redirects a admin */}
         <Route path="/" element={<Navigate to="/admin/dashboard" replace />} />
 
-        {/* Portal ADMIN interno */}
         <Route path="/admin" element={<AdminShell />}>
           <Route index element={<Navigate to="dashboard" replace />} />
           <Route path="dashboard" element={<Dashboard />} />
           <Route path="personal" element={<Personal />} />
           <Route path="sitios" element={<SitiosAsignacion />} />
+          <Route path="arbol" element={<ArbolReservaciones />} />
+          <Route path="preasignacion" element={<Preasignacion />} />
+          <Route path="asistencia" element={<ConfirmacionAsistencia />} />
           <Route path="checador" element={<Checador />} />
           <Route path="nomina" element={<Nomina />} />
           <Route path="requisiciones" element={<Requisiciones />} />
           <Route path="funnel" element={<FunnelReclutamiento />} />
+          <Route path="calendario-entrevistas" element={<CalendarioEntrevistas />} />
+          <Route path="alta-masiva" element={<AltaMasivaEmpleados />} />
           <Route path="facturacion" element={<Facturacion />} />
+          <Route path="catalogos" element={<CatalogosAdmin />} />
+          <Route path="usuarios" element={<UsuariosRoles />} />
           <Route path="config" element={<Configuracion />} />
           <Route path="pricing" element={<Pricing />} />
+          <Route path="dw" element={<DataWarehouse />} />
+          <Route path="suscripcion" element={<Suscripcion />} />
           <Route path="utilerias" element={<Utilerias />} />
           <Route path="bitacora" element={<Bitacora />} />
         </Route>
 
-        {/* Portal PÚBLICO candidatos */}
         <Route path="/vacantes" element={<PublicShell />}>
           <Route index element={<VacantesPublicas />} />
           <Route path=":vacanteId" element={<DetalleVacante />} />
@@ -63,7 +78,6 @@ export default function App() {
           <Route index element={<Postularme />} />
         </Route>
 
-        {/* Portal FREELANCE (empleados activos) */}
         <Route path="/portal" element={<FreelanceShell />}>
           <Route index element={<Navigate to="publicaciones" replace />} />
           <Route path="login" element={<FreelanceLogin />} />
@@ -73,7 +87,6 @@ export default function App() {
           <Route path="perfil" element={<MiPerfil />} />
         </Route>
 
-        {/* 404 → Admin */}
         <Route path="*" element={<Navigate to="/admin/dashboard" replace />} />
       </Routes>
     </BrowserRouter>
