@@ -6,94 +6,39 @@ import Badge from '../components/ui/Badge.jsx';
 import { supabase, supabaseReady } from '../lib/supabase.js';
 import { useModuleAudit } from '../lib/audit.js';
 
-// Explorador de datos — herramienta de soporte técnico.
-// Permite consultar cualquier tabla del schema sin ir a producción Supabase.
-// RLS del tenant sigue aplicando: solo verás filas del tenant activo.
-
-const TABLAS = [
-  // Operativo
-  { table: 'te_pedidos',                grupo: 'Operativo',    label: 'Pedidos' },
-  { table: 'te_pedidos_detalle',        grupo: 'Operativo',    label: 'Pedidos detalle' },
-  { table: 'te_reservaciones',          grupo: 'Operativo',    label: 'Reservaciones' },
-  { table: 'te_eventos_biometricos',    grupo: 'Operativo',    label: 'Eventos biométricos (append-only)' },
-  { table: 'te_reservacion_bitacora',   grupo: 'Operativo',    label: 'Bitácora de reservaciones' },
-  // RH / personas
-  { table: 'te_candidatos',             grupo: 'Personal',     label: 'Candidatos' },
-  { table: 'te_empleados',              grupo: 'Personal',     label: 'Empleados' },
-  { table: 'tr_empleado_plaza',         grupo: 'Personal',     label: 'Empleado ↔ plaza (certeza por puesto)' },
-  { table: 'te_consentimientos',        grupo: 'Personal',     label: 'Consentimientos (append-only)' },
-  { table: 'te_documentos_candidato',   grupo: 'Personal',     label: 'Documentos de candidato' },
-  { table: 'te_documentos_empleado',    grupo: 'Personal',     label: 'Documentos de empleado' },
-  { table: 'te_movimientos_empleado',   grupo: 'Personal',     label: 'Movimientos de empleado' },
-  { table: 'te_agenda_freelance',       grupo: 'Personal',     label: 'Agenda de freelance' },
-  { table: 'te_vacantes',               grupo: 'Personal',     label: 'Vacantes' },
-  { table: 'tr_postulacion_candidato_vacante', grupo: 'Personal', label: 'Postulaciones' },
-  { table: 'te_cursos_induccion',       grupo: 'Personal',     label: 'Cursos de inducción' },
-  { table: 'tr_asistencia_curso',       grupo: 'Personal',     label: 'Asistencia a curso' },
-  // Fiscal
-  { table: 'te_nominas_periodo',        grupo: 'Fiscal',       label: 'Nóminas — periodos' },
-  { table: 'te_nomina_detalle',         grupo: 'Fiscal',       label: 'Nómina detalle' },
-  { table: 'te_extras_nomina',          grupo: 'Fiscal',       label: 'Extras de nómina' },
-  { table: 'te_facturas_enc',           grupo: 'Fiscal',       label: 'Facturas encabezado' },
-  { table: 'te_facturas_det',           grupo: 'Fiscal',       label: 'Facturas detalle' },
-  { table: 'te_pagos_dispersion',       grupo: 'Fiscal',       label: 'Pagos dispersados' },
-  { table: 'te_aclaraciones',           grupo: 'Fiscal',       label: 'Aclaraciones de pago' },
-  // Catálogos
-  { table: 'tc_sitios',                 grupo: 'Catálogos',    label: 'Sitios' },
-  { table: 'tc_puestos',                grupo: 'Catálogos',    label: 'Puestos' },
-  { table: 'tc_turnos',                 grupo: 'Catálogos',    label: 'Turnos' },
-  { table: 'tc_bancos',                 grupo: 'Catálogos',    label: 'Bancos' },
-  { table: 'tc_sociedades_pagadoras',   grupo: 'Catálogos',    label: 'Sociedades pagadoras' },
-  { table: 'tc_sociedades_propias',     grupo: 'Catálogos',    label: 'Sociedades propias' },
-  { table: 'tc_unidades_negocio',       grupo: 'Catálogos',    label: 'Unidades de negocio' },
-  { table: 'tc_uniformes',              grupo: 'Catálogos',    label: 'Uniformes' },
-  { table: 'tc_clientes',               grupo: 'Catálogos',    label: 'Clientes' },
-  { table: 'tc_productos',              grupo: 'Catálogos',    label: 'Productos' },
-  { table: 'tc_estaciones',             grupo: 'Catálogos',    label: 'Estaciones de checado' },
-  { table: 'tc_dispositivos',           grupo: 'Catálogos',    label: 'Dispositivos biométricos' },
-  { table: 'tc_responsables',           grupo: 'Catálogos',    label: 'Responsables' },
-  { table: 'tc_fases_evento',           grupo: 'Catálogos',    label: 'Fases de evento' },
-  { table: 'tc_tipos_personal',         grupo: 'Catálogos',    label: 'Tipos de personal' },
-  { table: 'tc_tipos_documento',        grupo: 'Catálogos',    label: 'Tipos de documento' },
-  { table: 'tc_causas_aclaracion',      grupo: 'Catálogos',    label: 'Causas de aclaración' },
-  { table: 'tc_repse_registros',        grupo: 'Catálogos',    label: 'REPSE registros' },
-  { table: 'tc_estados_mx',             grupo: 'Catálogos',    label: 'Estados MX' },
-  // Sistema
-  { table: 'te_tenants',                grupo: 'Sistema',      label: 'Tenants' },
-  { table: 'tc_planes_suscripcion',     grupo: 'Sistema',      label: 'Planes de suscripción' },
-  { table: 'te_suscripciones',          grupo: 'Sistema',      label: 'Suscripciones' },
-  { table: 'tp_parametros_globales',    grupo: 'Sistema',      label: 'Parámetros globales' },
-  { table: 'tp_avisos_privacidad',      grupo: 'Sistema',      label: 'Avisos de privacidad' },
-  { table: 'tp_terminos_condiciones',   grupo: 'Sistema',      label: 'Términos y condiciones' },
-  { table: 'tp_precios_producto',       grupo: 'Sistema',      label: 'Precios de producto' },
-  { table: 'tp_pensiones_alimenticias', grupo: 'Sistema',      label: 'Pensiones alimenticias' },
-  { table: 'tp_folios',                 grupo: 'Sistema',      label: 'Folios consecutivos' },
-  { table: 'te_comunicados',            grupo: 'Sistema',      label: 'Comunicados' },
-  { table: 'tr_comunicado_destinatario', grupo: 'Sistema',     label: 'Comunicados destinatarios' }
-];
-
-const GRUPOS = ['Operativo', 'Personal', 'Fiscal', 'Catálogos', 'Sistema'];
 const PAGE_SIZE = 50;
 
 export default function Utilerias() {
   useModuleAudit('utilerias');
-  const [tablaActiva, setTablaActiva] = useState(TABLAS[0]);
+  const [tablas, setTablas] = useState([]);
+  const [tablaActiva, setTablaActiva] = useState(null);
   const [rows, setRows] = useState([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(0);
   const [orderCol, setOrderCol] = useState(null);
   const [orderAsc, setOrderAsc] = useState(true);
   const [busqueda, setBusqueda] = useState('');
-  const [grupo, setGrupo] = useState('todos');
+  const [dominio, setDominio] = useState('todos');
   const [detalle, setDetalle] = useState(null);
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState(null);
 
-  useEffect(() => { cargar(); }, [tablaActiva, page, orderCol, orderAsc]);
-  async function cargar() {
+  // Cargar catálogo dinámico de tablas al montar
+  useEffect(() => {
     if (!supabaseReady) return;
+    supabase.rpc('list_public_tables').then(({ data }) => {
+      const lista = data || [];
+      setTablas(lista);
+      if (lista.length > 0) setTablaActiva(lista[0]);
+    });
+  }, []);
+
+  useEffect(() => { if (tablaActiva) cargar(); }, [tablaActiva, page, orderCol, orderAsc]);
+
+  async function cargar() {
+    if (!supabaseReady || !tablaActiva) return;
     setLoading(true); setErr(null);
-    let q = supabase.from(tablaActiva.table).select('*', { count: 'exact' })
+    let q = supabase.from(tablaActiva.nombre).select('*', { count: 'exact' })
       .range(page * PAGE_SIZE, (page + 1) * PAGE_SIZE - 1);
     if (orderCol) q = q.order(orderCol, { ascending: orderAsc });
     const { data, count, error } = await q;
@@ -111,7 +56,16 @@ export default function Utilerias() {
     );
   }, [rows, busqueda]);
 
-  const tablasFiltradas = grupo === 'todos' ? TABLAS : TABLAS.filter(t => t.grupo === grupo);
+  const dominios = useMemo(() => [...new Set(tablas.map(t => t.dominio))], [tablas]);
+  const tablasFiltradas = dominio === 'todos' ? tablas : tablas.filter(t => t.dominio === dominio);
+  const tablasAgrupadas = useMemo(() => {
+    const g = {};
+    tablasFiltradas.forEach(t => {
+      g[t.dominio] = g[t.dominio] || [];
+      g[t.dominio].push(t);
+    });
+    return g;
+  }, [tablasFiltradas]);
 
   function ordenarPor(col) {
     if (orderCol === col) setOrderAsc(!orderAsc);
@@ -127,7 +81,7 @@ export default function Utilerias() {
     const blob = new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8;' });
     const a = document.createElement('a');
     a.href = URL.createObjectURL(blob);
-    a.download = `${tablaActiva.table}_${new Date().toISOString().slice(0,10)}.csv`;
+    a.download = `${tablaActiva.nombre}_${new Date().toISOString().slice(0,10)}.csv`;
     a.click();
   }
 
@@ -144,13 +98,18 @@ export default function Utilerias() {
       <div className="section-eyebrow">Soporte técnico / Dev</div>
       <h1>Utilerías · Explorador de datos</h1>
       <p style={{ color: 'var(--muted)', marginBottom: 20 }}>
-        Consulta cualquier tabla del schema sin salir de la app. Útil durante el arranque para dar soporte inmediato.
-        <strong> RLS del tenant aplica</strong> — solo ves filas del tenant activo, aunque uses este panel.
+        Cualquier tabla del schema sin salir de la app. Se cargan dinámicamente vía <code>list_public_tables()</code>.
+        <strong> RLS del tenant aplica</strong>: solo ves filas del tenant activo.
+        Total detectadas: <strong>{tablas.length}</strong>.
       </p>
 
       <div className="chips">
-        <Chip active={grupo === 'todos'} onClick={() => setGrupo('todos')}>Todos</Chip>
-        {GRUPOS.map(g => <Chip key={g} active={grupo === g} onClick={() => setGrupo(grupo === g ? 'todos' : g)}>{g}</Chip>)}
+        <Chip active={dominio === 'todos'} onClick={() => setDominio('todos')}>Todos ({tablas.length})</Chip>
+        {dominios.map(d => (
+          <Chip key={d} active={dominio === d} onClick={() => setDominio(dominio === d ? 'todos' : d)}>
+            {d} ({tablas.filter(t => t.dominio === d).length})
+          </Chip>
+        ))}
       </div>
 
       <div className="card">
@@ -159,18 +118,17 @@ export default function Utilerias() {
             <label className="label">Tabla</label>
             <select
               className="field"
-              value={tablaActiva.table}
-              onChange={e => { setTablaActiva(TABLAS.find(t => t.table === e.target.value)); setPage(0); setOrderCol(null); }}
+              value={tablaActiva?.nombre || ''}
+              onChange={e => {
+                const t = tablas.find(x => x.nombre === e.target.value);
+                if (t) { setTablaActiva(t); setPage(0); setOrderCol(null); }
+              }}
             >
-              {GRUPOS.map(g => {
-                const items = tablasFiltradas.filter(t => t.grupo === g);
-                if (!items.length) return null;
-                return (
-                  <optgroup key={g} label={g}>
-                    {items.map(t => <option key={t.table} value={t.table}>{t.label} — {t.table}</option>)}
-                  </optgroup>
-                );
-              })}
+              {Object.entries(tablasAgrupadas).map(([dom, lst]) => (
+                <optgroup key={dom} label={`${dom} (${lst.length})`}>
+                  {lst.map(t => <option key={t.nombre} value={t.nombre}>{t.nombre}</option>)}
+                </optgroup>
+              ))}
             </select>
           </div>
           <div>
@@ -180,7 +138,7 @@ export default function Utilerias() {
           <button className="btn outline" onClick={exportarCSV} disabled={rowsFiltradas.length === 0}>📥 Exportar CSV</button>
         </div>
         <div style={{ marginTop: 10, fontSize: 12, color: 'var(--muted)', display: 'flex', gap: 14, flexWrap: 'wrap' }}>
-          <span><strong style={{ color: 'var(--text)' }}>{total.toLocaleString('es-MX')}</strong> filas en <code>{tablaActiva.table}</code></span>
+          <span><strong style={{ color: 'var(--text)' }}>{total.toLocaleString('es-MX')}</strong> filas en <code>{tablaActiva?.nombre}</code></span>
           <span>Página {page + 1} de {Math.max(1, Math.ceil(total / PAGE_SIZE))}</span>
           {orderCol && <span>Orden: <code>{orderCol}</code> {orderAsc ? '↑' : '↓'}</span>}
           {loading && <span>cargando…</span>}
@@ -214,7 +172,6 @@ export default function Utilerias() {
         </table>
       </TablaWrap>
 
-      {/* Paginador */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 12 }}>
         <span style={{ fontSize: 12, color: 'var(--muted)' }}>{PAGE_SIZE} filas por página</span>
         <div style={{ display: 'flex', gap: 6 }}>
@@ -223,8 +180,7 @@ export default function Utilerias() {
         </div>
       </div>
 
-      {/* Modal detalle de fila */}
-      <Modal open={!!detalle} onClose={() => setDetalle(null)} title={`Detalle · ${tablaActiva.table}`} wide>
+      <Modal open={!!detalle} onClose={() => setDetalle(null)} title={`Detalle · ${tablaActiva?.nombre}`} wide>
         {detalle && (
           <div>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 2fr', gap: 8, fontSize: 12 }}>

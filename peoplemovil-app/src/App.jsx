@@ -1,5 +1,8 @@
-import React, { useState } from 'react';
-import Layout from './components/Layout.jsx';
+import React from 'react';
+import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
+
+// Admin (interno)
+import AdminShell from './components/admin/AdminShell.jsx';
 import Dashboard from './pages/Dashboard.jsx';
 import Personal from './pages/Personal.jsx';
 import SitiosAsignacion from './pages/SitiosAsignacion.jsx';
@@ -9,35 +12,70 @@ import Pricing from './pages/Pricing.jsx';
 import Configuracion from './pages/Configuracion.jsx';
 import Utilerias from './pages/Utilerias.jsx';
 import Bitacora from './pages/Bitacora.jsx';
+import Requisiciones from './pages/admin/Requisiciones.jsx';
+import Facturacion from './pages/admin/Facturacion.jsx';
+import FunnelReclutamiento from './pages/admin/FunnelReclutamiento.jsx';
 
-const SECCIONES = [
-  { titulo: 'Operación', items: [
-    { id: 'dashboard', label: 'Dashboard',           Comp: Dashboard },
-    { id: 'sitios',    label: 'Sitios y Asignación', Comp: SitiosAsignacion },
-    { id: 'checador',  label: 'Checador',            Comp: Checador },
-    { id: 'nomina',    label: 'Nómina',              Comp: Nomina }
-  ]},
-  { titulo: 'Personal', items: [
-    { id: 'personal', label: 'Empleados y candidatos', Comp: Personal }
-  ]},
-  { titulo: 'Administración', items: [
-    { id: 'config',  label: 'Configuración', Comp: Configuracion },
-    { id: 'pricing', label: 'Pricing',       Comp: Pricing }
-  ]},
-  { titulo: 'Soporte / Dev', items: [
-    { id: 'utilerias', label: 'Utilerías (explorador de datos)', Comp: Utilerias },
-    { id: 'bitacora',  label: 'Bitácora de accesos',              Comp: Bitacora }
-  ]}
-];
+// Portal público candidatos
+import PublicShell from './components/public/PublicShell.jsx';
+import VacantesPublicas from './pages/public/VacantesPublicas.jsx';
+import DetalleVacante from './pages/public/DetalleVacante.jsx';
+import Postularme from './pages/public/Postularme.jsx';
 
-const FLAT = SECCIONES.flatMap(g => g.items);
+// Portal freelance
+import FreelanceShell from './components/freelance/FreelanceShell.jsx';
+import FreelanceLogin from './pages/freelance/FreelanceLogin.jsx';
+import MisEventos from './pages/freelance/MisEventos.jsx';
+import Publicaciones from './pages/freelance/Publicaciones.jsx';
+import MiPerfil from './pages/freelance/MiPerfil.jsx';
+import MisPagos from './pages/freelance/MisPagos.jsx';
 
 export default function App() {
-  const [active, setActive] = useState('dashboard');
-  const Comp = FLAT.find(t => t.id === active)?.Comp || Dashboard;
   return (
-    <Layout secciones={SECCIONES} active={active} onSelect={setActive}>
-      <Comp />
-    </Layout>
+    <BrowserRouter>
+      <Routes>
+        {/* Root redirects a admin */}
+        <Route path="/" element={<Navigate to="/admin/dashboard" replace />} />
+
+        {/* Portal ADMIN interno */}
+        <Route path="/admin" element={<AdminShell />}>
+          <Route index element={<Navigate to="dashboard" replace />} />
+          <Route path="dashboard" element={<Dashboard />} />
+          <Route path="personal" element={<Personal />} />
+          <Route path="sitios" element={<SitiosAsignacion />} />
+          <Route path="checador" element={<Checador />} />
+          <Route path="nomina" element={<Nomina />} />
+          <Route path="requisiciones" element={<Requisiciones />} />
+          <Route path="funnel" element={<FunnelReclutamiento />} />
+          <Route path="facturacion" element={<Facturacion />} />
+          <Route path="config" element={<Configuracion />} />
+          <Route path="pricing" element={<Pricing />} />
+          <Route path="utilerias" element={<Utilerias />} />
+          <Route path="bitacora" element={<Bitacora />} />
+        </Route>
+
+        {/* Portal PÚBLICO candidatos */}
+        <Route path="/vacantes" element={<PublicShell />}>
+          <Route index element={<VacantesPublicas />} />
+          <Route path=":vacanteId" element={<DetalleVacante />} />
+        </Route>
+        <Route path="/postularme/:vacanteId" element={<PublicShell />}>
+          <Route index element={<Postularme />} />
+        </Route>
+
+        {/* Portal FREELANCE (empleados activos) */}
+        <Route path="/portal" element={<FreelanceShell />}>
+          <Route index element={<Navigate to="publicaciones" replace />} />
+          <Route path="login" element={<FreelanceLogin />} />
+          <Route path="mis-eventos" element={<MisEventos />} />
+          <Route path="publicaciones" element={<Publicaciones />} />
+          <Route path="mis-pagos" element={<MisPagos />} />
+          <Route path="perfil" element={<MiPerfil />} />
+        </Route>
+
+        {/* 404 → Admin */}
+        <Route path="*" element={<Navigate to="/admin/dashboard" replace />} />
+      </Routes>
+    </BrowserRouter>
   );
 }

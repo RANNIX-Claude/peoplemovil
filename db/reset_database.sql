@@ -1580,3 +1580,2047 @@ BEGIN
 END $$ LANGUAGE plpgsql SECURITY DEFINER;
 
 GRANT EXECUTE ON FUNCTION log_bitacora(text, text, text) TO anon, authenticated;
+
+
+-- ============================================================================
+-- Bloque agregado por migración 002 (portales freelance + público)
+-- ============================================================================
+-- ============================================================================
+-- Migración 002 — Portales freelance + público
+-- ============================================================================
+-- Cambios:
+--   1. Auth freelance: te_empleados.auth_user_id + nip + foto_url + preferencias
+--   2. Multi-fecha por pedido con vista agenda: te_pedido_fechas
+--   3. Publicación en portal: te_pedidos_detalle.publicado + cupo
+--   4. Adjuntos polimórficos: te_adjuntos
+--   5. Magic links para candidatos: te_magic_links
+--   6. Trigger de cupo en te_reservaciones
+--   7. Corrección PEP → tc_partidas_presupuestales
+--   8. Vistas para portal (matches + agenda + saldo)
+--   9. RLS para acceso del propio empleado a sus datos
+--  10. Función siguiente_folio_pedido, digest_freelance
+-- ============================================================================
+
+-- ---------------------------------------------------------------------------
+-- 1. Auth freelance y datos del portal
+-- ---------------------------------------------------------------------------
+ALTER TABLE te_empleados
+  ADD COLUMN IF NOT EXISTS auth_user_id     uuid UNIQUE,       -- FK lógica a auth.users.id de Supabase
+  ADD COLUMN IF NOT EXISTS nip              text,              -- NIP numérico (portal freelance)
+  ADD COLUMN IF NOT EXISTS nip_cambiado_en  timestamptz,
+  ADD COLUMN IF NOT EXISTS foto_url         text,              -- URL Supabase Storage
+  ADD COLUMN IF NOT EXISTS pref_notif_email    boolean NOT NULL DEFAULT true,
+  ADD COLUMN IF NOT EXISTS pref_notif_whatsapp boolean NOT NULL DEFAULT true,
+  ADD COLUMN IF NOT EXISTS pref_notif_push     boolean NOT NULL DEFAULT true,
+  ADD COLUMN IF NOT EXISTS pref_digest_hora    time NOT NULL DEFAULT '08:00';
+
+-- ---------------------------------------------------------------------------
+-- 2. Multi-fecha por pedido (vista tipo agenda)
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS te_pedido_fechas (
+  id             uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  tenant_id      uuid NOT NULL REFERENCES te_tenants(id) ON DELETE CASCADE,
+  pedido_id      uuid NOT NULL REFERENCES te_pedidos(id) ON DELETE CASCADE,
+  fase_evento_id uuid REFERENCES tc_fases_evento(id),
+  fecha          date NOT NULL,
+  hora_inicio    time NOT NULL,
+  hora_fin       time NOT NULL,
+  notas          text,
+  creado_en timestamptz NOT NULL DEFAULT now(), creado_por uuid,
+  modificado_en timestamptz NOT NULL DEFAULT now(), modificado_por uuid
+);
+CREATE INDEX IF NOT EXISTS ix_pf_pedido ON te_pedido_fechas(pedido_id, fecha);
+DROP TRIGGER IF EXISTS tg_aud_pf ON te_pedido_fechas;
+CREATE TRIGGER tg_aud_pf BEFORE INSERT OR UPDATE ON te_pedido_fechas
+  FOR EACH ROW EXECUTE FUNCTION tg_auditoria();
+ALTER TABLE te_pedido_fechas ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS p_te_pedido_fechas_sel ON te_pedido_fechas;
+DROP POLICY IF EXISTS p_te_pedido_fechas_ins ON te_pedido_fechas;
+DROP POLICY IF EXISTS p_te_pedido_fechas_upd ON te_pedido_fechas;
+DROP POLICY IF EXISTS p_te_pedido_fechas_del ON te_pedido_fechas;
+CREATE POLICY p_te_pedido_fechas_sel ON te_pedido_fechas FOR SELECT USING (tenant_id = current_tenant_id());
+CREATE POLICY p_te_pedido_fechas_ins ON te_pedido_fechas FOR INSERT WITH CHECK (tenant_id = current_tenant_id());
+CREATE POLICY p_te_pedido_fechas_upd ON te_pedido_fechas FOR UPDATE USING (tenant_id = current_tenant_id());
+CREATE POLICY p_te_pedido_fechas_del ON te_pedido_fechas FOR DELETE USING (tenant_id = current_tenant_id());
+
+-- El detalle puede colgar de una fecha específica
+ALTER TABLE te_pedidos_detalle
+  ADD COLUMN IF NOT EXISTS pedido_fecha_id uuid REFERENCES te_pedido_fechas(id) ON DELETE CASCADE;
+
+-- ---------------------------------------------------------------------------
+-- 3. Publicación en el portal + control de cupo
+-- ---------------------------------------------------------------------------
+ALTER TABLE te_pedidos_detalle
+  ADD COLUMN IF NOT EXISTS publicado     boolean NOT NULL DEFAULT false,
+  ADD COLUMN IF NOT EXISTS publicado_en  timestamptz,
+  ADD COLUMN IF NOT EXISTS cierra_en     timestamptz;
+
+-- Cupo actual del detalle (helper reutilizable)
+CREATE OR REPLACE FUNCTION cupo_pedido_detalle(p_detalle uuid)
+RETURNS TABLE (cupo_total int, cupo_ocupado int, cupo_libre int) AS $$
+DECLARE tot int; ocp int;
+BEGIN
+  SELECT cantidad INTO tot FROM te_pedidos_detalle WHERE id = p_detalle;
+  SELECT count(*) INTO ocp FROM te_reservaciones
+    WHERE pedido_detalle_id = p_detalle AND estado NOT IN ('cancelado');
+  RETURN QUERY SELECT tot, ocp, GREATEST(tot - ocp, 0);
+END $$ LANGUAGE plpgsql STABLE;
+
+-- Trigger que impide inscribirse si cupo lleno o no está publicado o falta plaza
+CREATE OR REPLACE FUNCTION tg_res_valida_cupo_y_plaza() RETURNS trigger AS $$
+DECLARE
+  det te_pedidos_detalle;
+  ocp int;
+  tiene_plaza boolean;
+BEGIN
+  IF NEW.pedido_detalle_id IS NULL THEN RETURN NEW; END IF;
+  SELECT * INTO det FROM te_pedidos_detalle WHERE id = NEW.pedido_detalle_id;
+  -- Publicación (solo cuando el request viene del portal: si es admin, permite)
+  IF NEW.creado_por IS NOT NULL AND EXISTS (
+    SELECT 1 FROM te_empleados e
+    WHERE e.auth_user_id = NEW.creado_por AND e.id = NEW.empleado_id
+  ) THEN
+    -- El empleado se está autoinscribiendo — exigimos publicado y cupo
+    IF NOT det.publicado THEN
+      RAISE EXCEPTION 'La posición no está publicada en el portal.' USING ERRCODE = 'insufficient_privilege';
+    END IF;
+    IF det.cierra_en IS NOT NULL AND det.cierra_en < now() THEN
+      RAISE EXCEPTION 'La ventana de inscripción cerró el %', det.cierra_en USING ERRCODE = 'insufficient_privilege';
+    END IF;
+    SELECT count(*) INTO ocp FROM te_reservaciones
+      WHERE pedido_detalle_id = NEW.pedido_detalle_id AND estado NOT IN ('cancelado');
+    IF ocp >= det.cantidad THEN
+      RAISE EXCEPTION 'Cupo lleno (%/% inscritos).', ocp, det.cantidad USING ERRCODE = 'insufficient_privilege';
+    END IF;
+    -- Debe tener plaza activa para el puesto
+    SELECT EXISTS(
+      SELECT 1 FROM tr_empleado_plaza
+      WHERE empleado_id = NEW.empleado_id AND puesto_id = det.puesto_id AND activo
+    ) INTO tiene_plaza;
+    IF NOT tiene_plaza THEN
+      RAISE EXCEPTION 'El empleado no tiene esa plaza activa.' USING ERRCODE = 'insufficient_privilege';
+    END IF;
+  END IF;
+  RETURN NEW;
+END $$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS tg_res_valida_cupo ON te_reservaciones;
+CREATE TRIGGER tg_res_valida_cupo BEFORE INSERT ON te_reservaciones
+  FOR EACH ROW EXECUTE FUNCTION tg_res_valida_cupo_y_plaza();
+
+-- ---------------------------------------------------------------------------
+-- 4. Adjuntos polimórficos (expedientes, incidencias, facturas)
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS te_adjuntos (
+  id            uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  tenant_id     uuid NOT NULL REFERENCES te_tenants(id) ON DELETE CASCADE,
+  ref_tipo      text NOT NULL,   -- 'empleado','candidato','reservacion','aclaracion','factura','pedido'
+  ref_id        uuid NOT NULL,
+  categoria     text,            -- 'INE','CV','comprobante_domicilio','uniforme','justificante_falta',...
+  nombre        text,
+  url_almacen   text NOT NULL,
+  mime          text,
+  bytes         bigint,
+  hash_sha256   text,
+  creado_en timestamptz NOT NULL DEFAULT now(), creado_por uuid,
+  modificado_en timestamptz NOT NULL DEFAULT now(), modificado_por uuid
+);
+CREATE INDEX IF NOT EXISTS ix_adj_ref ON te_adjuntos(tenant_id, ref_tipo, ref_id);
+DROP TRIGGER IF EXISTS tg_aud_adj ON te_adjuntos;
+CREATE TRIGGER tg_aud_adj BEFORE INSERT OR UPDATE ON te_adjuntos
+  FOR EACH ROW EXECUTE FUNCTION tg_auditoria();
+ALTER TABLE te_adjuntos ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS p_te_adjuntos_sel ON te_adjuntos;
+DROP POLICY IF EXISTS p_te_adjuntos_ins ON te_adjuntos;
+DROP POLICY IF EXISTS p_te_adjuntos_upd ON te_adjuntos;
+DROP POLICY IF EXISTS p_te_adjuntos_del ON te_adjuntos;
+CREATE POLICY p_te_adjuntos_sel ON te_adjuntos FOR SELECT USING (tenant_id = current_tenant_id());
+CREATE POLICY p_te_adjuntos_ins ON te_adjuntos FOR INSERT WITH CHECK (tenant_id = current_tenant_id());
+CREATE POLICY p_te_adjuntos_upd ON te_adjuntos FOR UPDATE USING (tenant_id = current_tenant_id());
+CREATE POLICY p_te_adjuntos_del ON te_adjuntos FOR DELETE USING (tenant_id = current_tenant_id());
+
+-- ---------------------------------------------------------------------------
+-- 5. Magic links (para candidatos externos)
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS te_magic_links (
+  id            uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  tenant_id     uuid NOT NULL REFERENCES te_tenants(id) ON DELETE CASCADE,
+  token         text NOT NULL UNIQUE,
+  candidato_id  uuid REFERENCES te_candidatos(id),
+  empleado_id   uuid REFERENCES te_empleados(id),
+  proposito     text NOT NULL,      -- 'completar_perfil','subir_docs','ver_postulacion','confirmar_reservacion'
+  expira_en     timestamptz NOT NULL,
+  usado_en      timestamptz,
+  creado_en     timestamptz NOT NULL DEFAULT now(),
+  CHECK (candidato_id IS NOT NULL OR empleado_id IS NOT NULL)
+);
+CREATE INDEX IF NOT EXISTS ix_ml_tok ON te_magic_links(token);
+ALTER TABLE te_magic_links ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS p_te_magic_links_sel ON te_magic_links;
+CREATE POLICY p_te_magic_links_sel ON te_magic_links FOR SELECT USING (tenant_id = current_tenant_id());
+
+-- ---------------------------------------------------------------------------
+-- 6. PEP: corrección semántica → Partidas Presupuestales
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS tc_partidas_presupuestales (
+  id             uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  tenant_id      uuid NOT NULL REFERENCES te_tenants(id) ON DELETE CASCADE,
+  clave_pep      text NOT NULL,   -- ej: 'T/009-S2-2010-05-19-IM'
+  descripcion    text NOT NULL,   -- ej: 'NAT GEO La Tierra'
+  categoria      text,
+  id_unidad_negocio uuid REFERENCES tc_unidades_negocio(id),
+  id_sitio       uuid REFERENCES tc_sitios(id),
+  terceros       boolean NOT NULL DEFAULT false,
+  id_sociedad_propia uuid REFERENCES tc_sociedades_propias(id),
+  anio           int,
+  vigente        boolean NOT NULL DEFAULT true,
+  creado_en timestamptz NOT NULL DEFAULT now(), creado_por uuid,
+  modificado_en timestamptz NOT NULL DEFAULT now(), modificado_por uuid,
+  UNIQUE (tenant_id, clave_pep)
+);
+DROP TRIGGER IF EXISTS tg_aud_pp ON tc_partidas_presupuestales;
+CREATE TRIGGER tg_aud_pp BEFORE INSERT OR UPDATE ON tc_partidas_presupuestales
+  FOR EACH ROW EXECUTE FUNCTION tg_auditoria();
+ALTER TABLE tc_partidas_presupuestales ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS p_pp_sel ON tc_partidas_presupuestales;
+DROP POLICY IF EXISTS p_pp_ins ON tc_partidas_presupuestales;
+DROP POLICY IF EXISTS p_pp_upd ON tc_partidas_presupuestales;
+DROP POLICY IF EXISTS p_pp_del ON tc_partidas_presupuestales;
+CREATE POLICY p_pp_sel ON tc_partidas_presupuestales FOR SELECT USING (tenant_id = current_tenant_id());
+CREATE POLICY p_pp_ins ON tc_partidas_presupuestales FOR INSERT WITH CHECK (tenant_id = current_tenant_id());
+CREATE POLICY p_pp_upd ON tc_partidas_presupuestales FOR UPDATE USING (tenant_id = current_tenant_id());
+CREATE POLICY p_pp_del ON tc_partidas_presupuestales FOR DELETE USING (tenant_id = current_tenant_id());
+
+-- El pedido puede referenciar una partida presupuestal (PEP)
+ALTER TABLE te_pedidos
+  ADD COLUMN IF NOT EXISTS partida_presupuestal_id uuid REFERENCES tc_partidas_presupuestales(id);
+
+-- ---------------------------------------------------------------------------
+-- 7. Reducir personal por certeza (regla del RQ_FREELANCELOBO)
+-- ---------------------------------------------------------------------------
+CREATE OR REPLACE FUNCTION reducir_personal_evento(p_detalle uuid, p_a_cancelar int)
+RETURNS int AS $$
+DECLARE n int := 0;
+BEGIN
+  UPDATE te_reservaciones
+  SET estado = 'cancelado', regla_aplicada = 'reducir_personal_evento (menor certeza primero)'
+  WHERE id IN (
+    SELECT r.id FROM te_reservaciones r
+    LEFT JOIN tr_empleado_plaza ep
+      ON ep.empleado_id = r.empleado_id AND ep.puesto_id = r.puesto_id
+    WHERE r.pedido_detalle_id = p_detalle
+      AND r.estado NOT IN ('cancelado', 'procesado')
+    ORDER BY COALESCE(ep.porcentaje_puntualidad, 0) ASC, r.creado_en DESC
+    LIMIT p_a_cancelar
+  );
+  GET DIAGNOSTICS n = ROW_COUNT;
+  RETURN n;
+END $$ LANGUAGE plpgsql;
+
+-- ---------------------------------------------------------------------------
+-- 8. Vistas para el portal freelance
+-- ---------------------------------------------------------------------------
+
+-- Publicaciones abiertas que matchean con mis plazas (para el freelance autenticado).
+-- Cliente pasa auth_user_id via JWT sub; la vista aplica RLS por tenant y filtra por identidad.
+CREATE OR REPLACE VIEW v_publicaciones_para_freelance AS
+SELECT
+  pd.id             AS pedido_detalle_id,
+  p.id              AS pedido_id,
+  p.folio,
+  p.titulo,
+  p.sitio_id,
+  s.titulo          AS sitio,
+  cl.razon_social   AS cliente,
+  pd.puesto_id,
+  pu.titulo         AS puesto,
+  pd.turno_id,
+  t.titulo          AS turno,
+  t.hora_inicio     AS turno_hora_inicio,
+  t.hora_fin        AS turno_hora_fin,
+  pf.fecha          AS fecha,
+  pf.hora_inicio    AS hora_inicio,
+  pf.hora_fin       AS hora_fin,
+  fe.titulo         AS fase,
+  pd.costo_unit,
+  pd.cantidad       AS cupo_total,
+  (SELECT count(*) FROM te_reservaciones r
+    WHERE r.pedido_detalle_id = pd.id AND r.estado NOT IN ('cancelado')) AS cupo_ocupado,
+  pd.cierra_en,
+  pd.publicado_en,
+  ep.empleado_id,
+  ep.porcentaje_puntualidad
+FROM te_pedidos_detalle pd
+JOIN te_pedidos p             ON p.id = pd.pedido_id
+LEFT JOIN te_pedido_fechas pf ON pf.id = pd.pedido_fecha_id
+LEFT JOIN tc_sitios s         ON s.id = p.sitio_id
+LEFT JOIN tc_clientes cl      ON cl.id = p.cliente_id
+LEFT JOIN tc_puestos pu       ON pu.id = pd.puesto_id
+LEFT JOIN tc_turnos t         ON t.id = pd.turno_id
+LEFT JOIN tc_fases_evento fe  ON fe.id = pf.fase_evento_id
+JOIN tr_empleado_plaza ep     ON ep.puesto_id = pd.puesto_id AND ep.activo
+WHERE pd.publicado = true
+  AND (pf.fecha IS NULL OR pf.fecha >= CURRENT_DATE)
+  AND (pd.cierra_en IS NULL OR pd.cierra_en > now())
+  AND (SELECT count(*) FROM te_reservaciones r
+        WHERE r.pedido_detalle_id = pd.id AND r.estado NOT IN ('cancelado')) < pd.cantidad
+  AND NOT EXISTS (
+    SELECT 1 FROM te_reservaciones r
+    WHERE r.pedido_detalle_id = pd.id
+      AND r.empleado_id = ep.empleado_id
+      AND r.estado NOT IN ('cancelado')
+  );
+
+GRANT SELECT ON v_publicaciones_para_freelance TO anon, authenticated;
+
+-- Agenda personal del freelance
+CREATE OR REPLACE VIEW v_agenda_freelance AS
+SELECT
+  r.id, r.empleado_id, r.pedido_id, r.pedido_detalle_id, r.puesto_id,
+  r.estado, r.estado_asistencia, r.cita_inicio, r.cita_fin,
+  p.folio AS pedido_folio, p.titulo AS pedido_titulo,
+  s.titulo AS sitio, pu.titulo AS puesto,
+  r.tenant_id
+FROM te_reservaciones r
+JOIN te_pedidos p     ON p.id = r.pedido_id
+LEFT JOIN tc_sitios s ON s.id = r.sitio_id
+LEFT JOIN tc_puestos pu ON pu.id = r.puesto_id;
+
+GRANT SELECT ON v_agenda_freelance TO anon, authenticated;
+
+-- Saldo (bruto - descontado) del empleado
+CREATE OR REPLACE FUNCTION saldo_empleado(p_empleado uuid)
+RETURNS numeric AS $$
+DECLARE bruto numeric; pagado numeric;
+BEGIN
+  SELECT COALESCE(sum(monto_neto), 0) INTO bruto FROM te_nomina_detalle
+    WHERE empleado_id = p_empleado AND estatus_pago IN ('calculado', 'dispersado');
+  SELECT COALESCE(sum(monto), 0) INTO pagado FROM te_pagos_dispersion
+    WHERE empleado_id = p_empleado AND status = 'pagado';
+  RETURN bruto - pagado;
+END $$ LANGUAGE plpgsql STABLE;
+
+-- ---------------------------------------------------------------------------
+-- 9. RLS extendido: el empleado freelance solo ve lo suyo
+-- ---------------------------------------------------------------------------
+
+-- Helper: id del empleado ligado al usuario autenticado
+CREATE OR REPLACE FUNCTION mi_empleado_id() RETURNS uuid AS $$
+BEGIN
+  RETURN (SELECT id FROM te_empleados WHERE auth_user_id = current_user_id() AND tenant_id = current_tenant_id());
+END $$ LANGUAGE plpgsql STABLE;
+
+-- Función para autoinscribirse (RPC pública para el portal)
+CREATE OR REPLACE FUNCTION inscribirme_a_publicacion(p_detalle uuid)
+RETURNS uuid AS $$
+DECLARE
+  det te_pedidos_detalle;
+  fe  te_pedido_fechas;
+  emp uuid;
+  nueva uuid;
+  cita_i timestamptz; cita_f timestamptz;
+BEGIN
+  emp := mi_empleado_id();
+  IF emp IS NULL THEN RAISE EXCEPTION 'Sesión sin empleado ligado (auth_user_id).'; END IF;
+  SELECT * INTO det FROM te_pedidos_detalle WHERE id = p_detalle;
+  IF det.id IS NULL THEN RAISE EXCEPTION 'Detalle no existe.'; END IF;
+  SELECT * INTO fe FROM te_pedido_fechas WHERE id = det.pedido_fecha_id;
+  IF fe.id IS NULL THEN
+    -- Fallback si el pedido no tiene fecha explícita
+    SELECT (fecha_evento::timestamp + hora_inicio::interval), (fecha_evento::timestamp + hora_fin::interval)
+      INTO cita_i, cita_f
+      FROM te_pedidos WHERE id = det.pedido_id;
+  ELSE
+    cita_i := (fe.fecha || ' ' || fe.hora_inicio)::timestamptz;
+    cita_f := (fe.fecha || ' ' || fe.hora_fin)::timestamptz;
+    IF cita_f <= cita_i THEN cita_f := cita_f + interval '1 day'; END IF;
+  END IF;
+  INSERT INTO te_reservaciones (
+    tenant_id, pedido_id, pedido_detalle_id, empleado_id, puesto_id,
+    sitio_id, estado, cita_inicio, cita_fin, duracion_en_turnos, creado_por
+  )
+  SELECT current_tenant_id(), det.pedido_id, det.id, emp, det.puesto_id,
+         (SELECT sitio_id FROM te_pedidos WHERE id = det.pedido_id),
+         'confirmado_voluntario', cita_i, cita_f, 1, current_user_id()
+  RETURNING id INTO nueva;
+  RETURN nueva;
+END $$ LANGUAGE plpgsql SECURITY DEFINER;
+GRANT EXECUTE ON FUNCTION inscribirme_a_publicacion(uuid) TO authenticated;
+
+-- RPC para cambiar NIP (portal)
+CREATE OR REPLACE FUNCTION cambiar_mi_nip(p_nip_nuevo text) RETURNS void AS $$
+DECLARE emp uuid;
+BEGIN
+  emp := mi_empleado_id();
+  IF emp IS NULL THEN RAISE EXCEPTION 'Sesión sin empleado ligado.'; END IF;
+  IF p_nip_nuevo IS NULL OR length(p_nip_nuevo) < 4 THEN RAISE EXCEPTION 'NIP debe tener al menos 4 dígitos.'; END IF;
+  UPDATE te_empleados SET nip = p_nip_nuevo, nip_cambiado_en = now(), modificado_en = now()
+    WHERE id = emp;
+END $$ LANGUAGE plpgsql SECURITY DEFINER;
+GRANT EXECUTE ON FUNCTION cambiar_mi_nip(text) TO authenticated;
+
+-- RPC para preferencias de notificación
+CREATE OR REPLACE FUNCTION actualizar_mis_preferencias(
+  p_email boolean, p_wa boolean, p_push boolean, p_digest_hora time
+) RETURNS void AS $$
+DECLARE emp uuid;
+BEGIN
+  emp := mi_empleado_id();
+  IF emp IS NULL THEN RAISE EXCEPTION 'Sesión sin empleado ligado.'; END IF;
+  UPDATE te_empleados
+    SET pref_notif_email = COALESCE(p_email, pref_notif_email),
+        pref_notif_whatsapp = COALESCE(p_wa, pref_notif_whatsapp),
+        pref_notif_push = COALESCE(p_push, pref_notif_push),
+        pref_digest_hora = COALESCE(p_digest_hora, pref_digest_hora),
+        modificado_en = now()
+    WHERE id = emp;
+END $$ LANGUAGE plpgsql SECURITY DEFINER;
+GRANT EXECUTE ON FUNCTION actualizar_mis_preferencias(boolean, boolean, boolean, time) TO authenticated;
+
+-- ---------------------------------------------------------------------------
+-- 10. Digest diario — genera payload para el cron
+-- ---------------------------------------------------------------------------
+CREATE OR REPLACE FUNCTION armar_digest_freelance(p_empleado uuid, p_dias int DEFAULT 7)
+RETURNS jsonb AS $$
+DECLARE
+  emp te_empleados;
+  publis jsonb;
+  agenda jsonb;
+  saldo numeric;
+BEGIN
+  SELECT * INTO emp FROM te_empleados WHERE id = p_empleado;
+  IF emp.id IS NULL THEN RETURN NULL; END IF;
+
+  -- Publicaciones matcheadas
+  SELECT COALESCE(jsonb_agg(row_to_json(v)), '[]'::jsonb) INTO publis
+  FROM (
+    SELECT v.pedido_detalle_id, v.puesto, v.sitio, v.fecha, v.hora_inicio, v.hora_fin,
+           v.cupo_total, v.cupo_ocupado, v.costo_unit
+    FROM v_publicaciones_para_freelance v
+    WHERE v.empleado_id = p_empleado
+      AND v.tenant_id = emp.tenant_id
+      AND (v.fecha IS NULL OR v.fecha <= CURRENT_DATE + p_dias)
+    ORDER BY v.fecha NULLS LAST
+    LIMIT 25
+  ) v;
+
+  -- Agenda propia próxima
+  SELECT COALESCE(jsonb_agg(row_to_json(a)), '[]'::jsonb) INTO agenda
+  FROM (
+    SELECT a.id, a.puesto, a.sitio, a.cita_inicio, a.cita_fin, a.estado
+    FROM v_agenda_freelance a
+    WHERE a.empleado_id = p_empleado AND a.tenant_id = emp.tenant_id
+      AND a.cita_inicio BETWEEN now() AND now() + (p_dias || ' days')::interval
+      AND a.estado NOT IN ('cancelado', 'procesado')
+    ORDER BY a.cita_inicio
+    LIMIT 25
+  ) a;
+
+  saldo := saldo_empleado(p_empleado);
+
+  RETURN jsonb_build_object(
+    'empleado_id',    p_empleado,
+    'nombre',         emp.nombres || ' ' || emp.apellido_paterno,
+    'correo',         emp.correo,
+    'telefono',       emp.telefono,
+    'pref_email',     emp.pref_notif_email,
+    'pref_whatsapp',  emp.pref_notif_whatsapp,
+    'pref_push',      emp.pref_notif_push,
+    'saldo',          saldo,
+    'publicaciones',  publis,
+    'agenda',         agenda
+  );
+END $$ LANGUAGE plpgsql STABLE;
+
+GRANT EXECUTE ON FUNCTION armar_digest_freelance(uuid, int) TO service_role;
+GRANT EXECUTE ON FUNCTION saldo_empleado(uuid) TO anon, authenticated;
+
+-- ============================================================================
+-- Migración 003a_modelo_comercial
+-- ============================================================================
+-- ============================================================================
+-- Migration 003a — Modelo comercial
+-- Sistema Lobo/AppSCPF: refinamientos del ciclo Requisición → Pedido → Facturación
+-- Aditivo — no rompe estructuras existentes
+-- ============================================================================
+
+-- ---------------------------------------------------------------------------
+-- 1. Enum de estado del detalle de pedido (extrae 1=borrador, 4=liberado, ...)
+-- ---------------------------------------------------------------------------
+DO $$ BEGIN
+  CREATE TYPE estado_detalle_pedido_enum AS ENUM (
+    'borrador', 'liberado', 'cancelado', 'procesado', 'facturado'
+  );
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+DO $$ BEGIN
+  CREATE TYPE tipo_movimiento_pedido_enum AS ENUM ('pedido', 'servicio_interno', 'orden_servicio');
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+DO $$ BEGIN
+  CREATE TYPE status_facturacion_enum AS ENUM (
+    'no_facturable', 'pendiente', 'parcial', 'facturado', 'cancelado'
+  );
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+-- ---------------------------------------------------------------------------
+-- 2. Nuevos catálogos comerciales
+-- ---------------------------------------------------------------------------
+
+CREATE TABLE IF NOT EXISTS tc_tipos_movimiento_pedido (
+  id            uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  tenant_id     uuid NOT NULL REFERENCES te_tenants(id) ON DELETE CASCADE,
+  clave         tipo_movimiento_pedido_enum NOT NULL,
+  titulo        text NOT NULL,
+  descripcion   text,
+  se_factura    boolean NOT NULL DEFAULT true,
+  activo        boolean NOT NULL DEFAULT true,
+  creado_en timestamptz NOT NULL DEFAULT now(), creado_por uuid,
+  modificado_en timestamptz NOT NULL DEFAULT now(), modificado_por uuid,
+  UNIQUE (tenant_id, clave)
+);
+DROP TRIGGER IF EXISTS tg_aud_tmp ON tc_tipos_movimiento_pedido;
+CREATE TRIGGER tg_aud_tmp BEFORE INSERT OR UPDATE ON tc_tipos_movimiento_pedido
+  FOR EACH ROW EXECUTE FUNCTION tg_auditoria();
+
+CREATE TABLE IF NOT EXISTS tc_tipos_complejidad (
+  id            uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  tenant_id     uuid NOT NULL REFERENCES te_tenants(id) ON DELETE CASCADE,
+  clave         text NOT NULL,
+  titulo        text NOT NULL,
+  descripcion   text,
+  factor_costo  numeric(5,2) NOT NULL DEFAULT 1.00,
+  id_unidad_negocio uuid REFERENCES tc_unidades_negocio(id),
+  activo        boolean NOT NULL DEFAULT true,
+  creado_en timestamptz NOT NULL DEFAULT now(), creado_por uuid,
+  modificado_en timestamptz NOT NULL DEFAULT now(), modificado_por uuid,
+  UNIQUE (tenant_id, clave)
+);
+DROP TRIGGER IF EXISTS tg_aud_tcplx ON tc_tipos_complejidad;
+CREATE TRIGGER tg_aud_tcplx BEFORE INSERT OR UPDATE ON tc_tipos_complejidad
+  FOR EACH ROW EXECUTE FUNCTION tg_auditoria();
+
+CREATE TABLE IF NOT EXISTS tc_tipos_duracion_evento (
+  id            uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  tenant_id     uuid NOT NULL REFERENCES te_tenants(id) ON DELETE CASCADE,
+  clave         text NOT NULL,
+  titulo        text NOT NULL,
+  dias_minimos  int,
+  dias_maximos  int,
+  activo        boolean NOT NULL DEFAULT true,
+  creado_en timestamptz NOT NULL DEFAULT now(), creado_por uuid,
+  modificado_en timestamptz NOT NULL DEFAULT now(), modificado_por uuid,
+  UNIQUE (tenant_id, clave)
+);
+DROP TRIGGER IF EXISTS tg_aud_tde ON tc_tipos_duracion_evento;
+CREATE TRIGGER tg_aud_tde BEFORE INSERT OR UPDATE ON tc_tipos_duracion_evento
+  FOR EACH ROW EXECUTE FUNCTION tg_auditoria();
+
+-- Parametrización de duraciones ricas: encabezado + rangos matriciales
+CREATE TABLE IF NOT EXISTS tp_duraciones_evento (
+  id                     uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  tenant_id              uuid NOT NULL REFERENCES te_tenants(id) ON DELETE CASCADE,
+  tipo_duracion_id       uuid NOT NULL REFERENCES tc_tipos_duracion_evento(id) ON DELETE CASCADE,
+  id_tipo_complejidad    uuid REFERENCES tc_tipos_complejidad(id),
+  dias_desde             int NOT NULL,
+  dias_hasta             int NOT NULL,
+  factor_sueldo          numeric(5,3) NOT NULL DEFAULT 1.0,
+  observaciones          text,
+  creado_en timestamptz NOT NULL DEFAULT now(), creado_por uuid,
+  modificado_en timestamptz NOT NULL DEFAULT now(), modificado_por uuid,
+  CHECK (dias_hasta >= dias_desde)
+);
+CREATE INDEX IF NOT EXISTS ix_tp_dur ON tp_duraciones_evento(tenant_id, tipo_duracion_id, dias_desde);
+DROP TRIGGER IF EXISTS tg_aud_tpdur ON tp_duraciones_evento;
+CREATE TRIGGER tg_aud_tpdur BEFORE INSERT OR UPDATE ON tp_duraciones_evento
+  FOR EACH ROW EXECUTE FUNCTION tg_auditoria();
+
+-- Precios especiales por cliente (override de precio base por producto)
+CREATE TABLE IF NOT EXISTS tp_precios_especiales_cliente (
+  id             uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  tenant_id      uuid NOT NULL REFERENCES te_tenants(id) ON DELETE CASCADE,
+  cliente_id     uuid NOT NULL REFERENCES tc_clientes(id) ON DELETE CASCADE,
+  producto_id    uuid NOT NULL REFERENCES tc_productos(id) ON DELETE CASCADE,
+  precio_unit    numeric(12,2) NOT NULL,
+  moneda         text NOT NULL DEFAULT 'MXN',
+  vigente_desde  date NOT NULL DEFAULT CURRENT_DATE,
+  vigente_hasta  date,
+  activo         boolean NOT NULL DEFAULT true,
+  creado_en timestamptz NOT NULL DEFAULT now(), creado_por uuid,
+  modificado_en timestamptz NOT NULL DEFAULT now(), modificado_por uuid,
+  UNIQUE (tenant_id, cliente_id, producto_id, vigente_desde)
+);
+CREATE INDEX IF NOT EXISTS ix_tp_pec_cli ON tp_precios_especiales_cliente(tenant_id, cliente_id, producto_id);
+DROP TRIGGER IF EXISTS tg_aud_tpec ON tp_precios_especiales_cliente;
+CREATE TRIGGER tg_aud_tpec BEFORE INSERT OR UPDATE ON tp_precios_especiales_cliente
+  FOR EACH ROW EXECUTE FUNCTION tg_auditoria();
+
+-- ---------------------------------------------------------------------------
+-- 3. Nueva tabla: Requisición de personal (previa al pedido)
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS te_requisicion_personal (
+  id                  uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  tenant_id           uuid NOT NULL REFERENCES te_tenants(id) ON DELETE CASCADE,
+  folio               int NOT NULL,
+  titulo              text NOT NULL,
+  descripcion         text,
+  cliente_id          uuid REFERENCES tc_clientes(id),
+  solicitante_nombre  text,
+  solicitante_correo  text,
+  solicitante_telefono text,
+  fecha_evento        date NOT NULL,
+  fecha_solicitud     timestamptz NOT NULL DEFAULT now(),
+  fecha_deseada       date,
+  cantidad_estimada   int,
+  estatus             text NOT NULL DEFAULT 'recibida',
+  observaciones       text,
+  pedido_generado_id  uuid REFERENCES te_pedidos(id),
+  rechazada_motivo    text,
+  creado_en timestamptz NOT NULL DEFAULT now(), creado_por uuid,
+  modificado_en timestamptz NOT NULL DEFAULT now(), modificado_por uuid,
+  UNIQUE (tenant_id, folio)
+);
+CREATE INDEX IF NOT EXISTS ix_reqper_fecha ON te_requisicion_personal(tenant_id, fecha_evento);
+CREATE INDEX IF NOT EXISTS ix_reqper_est ON te_requisicion_personal(tenant_id, estatus);
+DROP TRIGGER IF EXISTS tg_aud_reqper ON te_requisicion_personal;
+CREATE TRIGGER tg_aud_reqper BEFORE INSERT OR UPDATE ON te_requisicion_personal
+  FOR EACH ROW EXECUTE FUNCTION tg_auditoria();
+
+ALTER TABLE te_requisicion_personal ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS p_reqper_sel ON te_requisicion_personal;
+DROP POLICY IF EXISTS p_reqper_ins ON te_requisicion_personal;
+DROP POLICY IF EXISTS p_reqper_upd ON te_requisicion_personal;
+DROP POLICY IF EXISTS p_reqper_del ON te_requisicion_personal;
+CREATE POLICY p_reqper_sel ON te_requisicion_personal FOR SELECT USING (tenant_id = current_tenant_id());
+CREATE POLICY p_reqper_ins ON te_requisicion_personal FOR INSERT WITH CHECK (tenant_id = current_tenant_id());
+CREATE POLICY p_reqper_upd ON te_requisicion_personal FOR UPDATE USING (tenant_id = current_tenant_id());
+CREATE POLICY p_reqper_del ON te_requisicion_personal FOR DELETE USING (tenant_id = current_tenant_id());
+
+-- ---------------------------------------------------------------------------
+-- 4. Expandir te_pedidos con campos del sistema Lobo real
+-- ---------------------------------------------------------------------------
+ALTER TABLE te_pedidos
+  ADD COLUMN IF NOT EXISTS requisicion_id      uuid REFERENCES te_requisicion_personal(id),
+  -- Snapshot cliente al momento del pedido (denormalización intencional)
+  ADD COLUMN IF NOT EXISTS cliente_nombre_snap text,
+  ADD COLUMN IF NOT EXISTS cliente_rfc_snap    text,
+  ADD COLUMN IF NOT EXISTS cliente_direccion_snap text,
+  ADD COLUMN IF NOT EXISTS cliente_telefono_snap  text,
+  -- Contacto específico del cliente
+  ADD COLUMN IF NOT EXISTS contacto_id         uuid,
+  ADD COLUMN IF NOT EXISTS contacto_nombre     text,
+  ADD COLUMN IF NOT EXISTS contacto_telefono   text,
+  -- Estructura organizacional
+  ADD COLUMN IF NOT EXISTS tipo_movimiento_id  uuid REFERENCES tc_tipos_movimiento_pedido(id),
+  ADD COLUMN IF NOT EXISTS tipo_complejidad_id uuid REFERENCES tc_tipos_complejidad(id),
+  ADD COLUMN IF NOT EXISTS tipo_duracion_id    uuid REFERENCES tc_tipos_duracion_evento(id),
+  ADD COLUMN IF NOT EXISTS duracion_dias       int,
+  -- Políticas del pedido
+  ADD COLUMN IF NOT EXISTS permitir_cancelaciones boolean NOT NULL DEFAULT true,
+  ADD COLUMN IF NOT EXISTS status_facturacion  status_facturacion_enum NOT NULL DEFAULT 'no_facturable',
+  -- Financiero snapshot
+  ADD COLUMN IF NOT EXISTS subtotal            numeric(14,2) DEFAULT 0,
+  ADD COLUMN IF NOT EXISTS iva                 numeric(14,2) DEFAULT 0,
+  ADD COLUMN IF NOT EXISTS total_con_iva       numeric(14,2) DEFAULT 0,
+  ADD COLUMN IF NOT EXISTS costo_por_nomina    numeric(14,2) DEFAULT 0,
+  -- Versionado y auditoría
+  ADD COLUMN IF NOT EXISTS version_vigente     boolean NOT NULL DEFAULT true,
+  ADD COLUMN IF NOT EXISTS pedido_anterior_id  uuid REFERENCES te_pedidos(id);
+
+-- ---------------------------------------------------------------------------
+-- 5. Expandir te_pedidos_detalle con los ~25 campos del Lobo
+-- ---------------------------------------------------------------------------
+ALTER TABLE te_pedidos_detalle
+  -- Estado detallado (reemplaza el boolean publicado)
+  ADD COLUMN IF NOT EXISTS status_detalle       estado_detalle_pedido_enum NOT NULL DEFAULT 'borrador',
+  -- Fechas múltiples que tenía el original
+  ADD COLUMN IF NOT EXISTS fecha_entrega        date,
+  ADD COLUMN IF NOT EXISTS fecha_cita           date,
+  ADD COLUMN IF NOT EXISTS hora_cita_inicio     time,
+  ADD COLUMN IF NOT EXISTS hora_cita_fin        time,
+  ADD COLUMN IF NOT EXISTS fecha_liberacion     timestamptz,
+  ADD COLUMN IF NOT EXISTS fecha_vigencia_preasignados timestamptz,
+  ADD COLUMN IF NOT EXISTS fecha_fin_bloque     timestamptz,
+  -- Agrupación por bloques
+  ADD COLUMN IF NOT EXISTS bloque_num           int,
+  -- Tipo Staff/Operativo (originalmente TC_TipoPersonalID)
+  ADD COLUMN IF NOT EXISTS id_tipo_personal     uuid REFERENCES tc_tipos_personal(id),
+  ADD COLUMN IF NOT EXISTS producto_id          uuid REFERENCES tc_productos(id),
+  -- Turnos y contadores paralelos
+  ADD COLUMN IF NOT EXISTS turnos               numeric(5,2) DEFAULT 1,
+  ADD COLUMN IF NOT EXISTS cantidad_reservados          int NOT NULL DEFAULT 0,
+  ADD COLUMN IF NOT EXISTS cantidad_reservados_con_pre  int NOT NULL DEFAULT 0,
+  ADD COLUMN IF NOT EXISTS cantidad_reservados_real     int NOT NULL DEFAULT 0,
+  ADD COLUMN IF NOT EXISTS cantidad_que_asistieron      int NOT NULL DEFAULT 0,
+  ADD COLUMN IF NOT EXISTS porcentaje_completo          numeric(5,2) NOT NULL DEFAULT 0,
+  ADD COLUMN IF NOT EXISTS porcentaje_completo_con_pre  numeric(5,2) NOT NULL DEFAULT 0,
+  -- Sitio de entrega específico (aparte del sitio del pedido)
+  ADD COLUMN IF NOT EXISTS id_lugar_entrega     uuid REFERENCES tc_sitios(id),
+  ADD COLUMN IF NOT EXISTS direccion_entrega    text,
+  -- Fiscal
+  ADD COLUMN IF NOT EXISTS facturable           boolean NOT NULL DEFAULT true,
+  ADD COLUMN IF NOT EXISTS folio_factura        int,
+  ADD COLUMN IF NOT EXISTS factura_servicio_interno text,
+  ADD COLUMN IF NOT EXISTS precio               numeric(12,2),
+  ADD COLUMN IF NOT EXISTS pago_especial        numeric(12,2),
+  ADD COLUMN IF NOT EXISTS costo_por_nomina     numeric(12,2),
+  ADD COLUMN IF NOT EXISTS periodo_pago         int,
+  ADD COLUMN IF NOT EXISTS periodo_lista_asistencia int,
+  -- Similares y presentación
+  ADD COLUMN IF NOT EXISTS producto_matricial   boolean DEFAULT false,
+  ADD COLUMN IF NOT EXISTS completar_productos_similares boolean DEFAULT false,
+  -- SMS
+  ADD COLUMN IF NOT EXISTS fecha_envio_sms      timestamptz,
+  ADD COLUMN IF NOT EXISTS status_envio_sms     text,
+  ADD COLUMN IF NOT EXISTS envio_sms_preasignados boolean NOT NULL DEFAULT false,
+  -- Auditoría de correos automáticos
+  ADD COLUMN IF NOT EXISTS correo_enviado_faltas       boolean NOT NULL DEFAULT false,
+  ADD COLUMN IF NOT EXISTS correo_enviado_pep_temporal boolean NOT NULL DEFAULT false,
+  -- Otras políticas
+  ADD COLUMN IF NOT EXISTS permitir_cancelar_confirmaciones boolean NOT NULL DEFAULT true,
+  ADD COLUMN IF NOT EXISTS indicaciones_especiales     text,
+  ADD COLUMN IF NOT EXISTS fase_evento_str      text;   -- string libre (además del id enum)
+
+-- Mantener consistencia con `publicado`: cuando status_detalle = 'liberado' → publicado=true
+CREATE OR REPLACE FUNCTION tg_sync_detalle_publicado() RETURNS trigger AS $$
+BEGIN
+  IF NEW.status_detalle IN ('liberado','procesado','facturado') THEN
+    NEW.publicado := true;
+    IF NEW.publicado_en IS NULL THEN NEW.publicado_en := now(); END IF;
+  ELSE
+    NEW.publicado := false;
+  END IF;
+  RETURN NEW;
+END $$ LANGUAGE plpgsql;
+DROP TRIGGER IF EXISTS tg_detalle_pub_sync ON te_pedidos_detalle;
+CREATE TRIGGER tg_detalle_pub_sync BEFORE INSERT OR UPDATE ON te_pedidos_detalle
+  FOR EACH ROW EXECUTE FUNCTION tg_sync_detalle_publicado();
+
+-- ---------------------------------------------------------------------------
+-- 6. Enriquecer tc_partidas_presupuestales (PEP) — ya tenía la base
+-- ---------------------------------------------------------------------------
+ALTER TABLE tc_partidas_presupuestales
+  ADD COLUMN IF NOT EXISTS id_lugar_predeterminado uuid REFERENCES tc_sitios(id);
+-- id_sociedad_propia, terceros, anio, id_unidad_negocio ya existen desde mig 002.
+
+-- ---------------------------------------------------------------------------
+-- 7. Funciones de negocio
+-- ---------------------------------------------------------------------------
+
+-- Libera un pedido: pasa todos sus detalles en borrador a liberado
+-- (equivalente a PRC_liberarpedido del sistema Lobo)
+CREATE OR REPLACE FUNCTION liberar_pedido(p_pedido uuid) RETURNS int AS $$
+DECLARE n int := 0;
+BEGIN
+  UPDATE te_pedidos_detalle
+    SET status_detalle = 'liberado',
+        fecha_liberacion = now(),
+        publicado = true,
+        publicado_en = now()
+    WHERE pedido_id = p_pedido AND status_detalle = 'borrador';
+  GET DIAGNOSTICS n = ROW_COUNT;
+  UPDATE te_pedidos SET status = 'liberado', modificado_en = now() WHERE id = p_pedido;
+  RETURN n;
+END $$ LANGUAGE plpgsql;
+
+-- Convierte una requisición en pedido (transaccional)
+CREATE OR REPLACE FUNCTION convertir_requisicion_a_pedido(
+  p_requisicion uuid,
+  p_titulo text,
+  p_sitio_id uuid
+) RETURNS uuid AS $$
+DECLARE r te_requisicion_personal; nuevo_pedido_id uuid; nuevo_folio int;
+BEGIN
+  SELECT * INTO r FROM te_requisicion_personal WHERE id = p_requisicion;
+  IF r.id IS NULL THEN RAISE EXCEPTION 'requisición no existe'; END IF;
+  IF r.pedido_generado_id IS NOT NULL THEN
+    RAISE EXCEPTION 'requisición % ya generó pedido %', p_requisicion, r.pedido_generado_id;
+  END IF;
+  nuevo_folio := siguiente_folio(r.tenant_id, 'pedido');
+  INSERT INTO te_pedidos (
+    tenant_id, folio, titulo, sitio_id, cliente_id, fecha_evento, requisicion_id
+  ) VALUES (
+    r.tenant_id, nuevo_folio, p_titulo, p_sitio_id, r.cliente_id, r.fecha_evento, r.id
+  ) RETURNING id INTO nuevo_pedido_id;
+  UPDATE te_requisicion_personal SET pedido_generado_id = nuevo_pedido_id, estatus = 'convertida'
+    WHERE id = r.id;
+  RETURN nuevo_pedido_id;
+END $$ LANGUAGE plpgsql;
+
+-- Recalcula porcentajes de cobertura del detalle (para semáforo verde/rojo)
+CREATE OR REPLACE FUNCTION recalcular_cobertura_detalle(p_detalle uuid) RETURNS void AS $$
+DECLARE cant int; res_real int; res_con_pre int;
+BEGIN
+  SELECT cantidad INTO cant FROM te_pedidos_detalle WHERE id = p_detalle;
+  IF cant IS NULL OR cant <= 0 THEN RETURN; END IF;
+  SELECT count(*) FILTER (WHERE estado NOT IN ('cancelado', 'preasignado', 'confirmado_opcional')) INTO res_real
+    FROM te_reservaciones WHERE pedido_detalle_id = p_detalle;
+  SELECT count(*) FILTER (WHERE estado NOT IN ('cancelado')) INTO res_con_pre
+    FROM te_reservaciones WHERE pedido_detalle_id = p_detalle;
+  UPDATE te_pedidos_detalle SET
+    cantidad_reservados_real     = res_real,
+    cantidad_reservados_con_pre  = res_con_pre,
+    porcentaje_completo          = round(100.0 * res_real / cant, 2),
+    porcentaje_completo_con_pre  = round(100.0 * res_con_pre / cant, 2)
+  WHERE id = p_detalle;
+END $$ LANGUAGE plpgsql;
+
+-- Trigger: recalcular cobertura cuando cambia una reservación
+CREATE OR REPLACE FUNCTION tg_reservacion_recalc_cobertura() RETURNS trigger AS $$
+BEGIN
+  IF TG_OP = 'DELETE' THEN
+    PERFORM recalcular_cobertura_detalle(OLD.pedido_detalle_id);
+  ELSE
+    PERFORM recalcular_cobertura_detalle(NEW.pedido_detalle_id);
+  END IF;
+  RETURN NULL;
+END $$ LANGUAGE plpgsql;
+DROP TRIGGER IF EXISTS tg_res_recalc_cob ON te_reservaciones;
+CREATE TRIGGER tg_res_recalc_cob AFTER INSERT OR UPDATE OF estado OR DELETE ON te_reservaciones
+  FOR EACH ROW EXECUTE FUNCTION tg_reservacion_recalc_cobertura();
+
+-- Precio efectivo: precio especial cliente si existe, sino precio base producto
+CREATE OR REPLACE FUNCTION precio_efectivo(
+  p_producto uuid, p_cliente uuid, p_fecha date DEFAULT CURRENT_DATE
+) RETURNS numeric AS $$
+DECLARE p numeric;
+BEGIN
+  SELECT precio_unit INTO p FROM tp_precios_especiales_cliente
+    WHERE producto_id = p_producto AND cliente_id = p_cliente AND activo
+      AND vigente_desde <= p_fecha AND (vigente_hasta IS NULL OR vigente_hasta >= p_fecha)
+    ORDER BY vigente_desde DESC LIMIT 1;
+  IF p IS NOT NULL THEN RETURN p; END IF;
+  SELECT precio_unit INTO p FROM tp_precios_producto
+    WHERE producto_id = p_producto AND (cliente_id IS NULL OR cliente_id = p_cliente)
+      AND vigente_desde <= p_fecha AND (vigente_hasta IS NULL OR vigente_hasta >= p_fecha)
+    ORDER BY vigente_desde DESC LIMIT 1;
+  RETURN COALESCE(p, 0);
+END $$ LANGUAGE plpgsql STABLE;
+
+-- ---------------------------------------------------------------------------
+-- 8. GRANTS Supabase
+-- ---------------------------------------------------------------------------
+GRANT ALL ON tc_tipos_movimiento_pedido,
+             tc_tipos_complejidad,
+             tc_tipos_duracion_evento,
+             tp_duraciones_evento,
+             tp_precios_especiales_cliente,
+             te_requisicion_personal
+  TO anon, authenticated, service_role;
+GRANT EXECUTE ON FUNCTION liberar_pedido(uuid),
+                          convertir_requisicion_a_pedido(uuid,text,uuid),
+                          recalcular_cobertura_detalle(uuid),
+                          precio_efectivo(uuid,uuid,date)
+  TO anon, authenticated, service_role;
+
+-- RLS en las nuevas
+ALTER TABLE tc_tipos_movimiento_pedido ENABLE ROW LEVEL SECURITY;
+ALTER TABLE tc_tipos_complejidad       ENABLE ROW LEVEL SECURITY;
+ALTER TABLE tc_tipos_duracion_evento   ENABLE ROW LEVEL SECURITY;
+ALTER TABLE tp_duraciones_evento       ENABLE ROW LEVEL SECURITY;
+ALTER TABLE tp_precios_especiales_cliente ENABLE ROW LEVEL SECURITY;
+
+DO $$
+DECLARE t text;
+BEGIN
+  FOREACH t IN ARRAY ARRAY['tc_tipos_movimiento_pedido','tc_tipos_complejidad',
+                           'tc_tipos_duracion_evento','tp_duraciones_evento',
+                           'tp_precios_especiales_cliente'] LOOP
+    EXECUTE format('DROP POLICY IF EXISTS p_%1$s_sel ON %1$s', t);
+    EXECUTE format('DROP POLICY IF EXISTS p_%1$s_ins ON %1$s', t);
+    EXECUTE format('DROP POLICY IF EXISTS p_%1$s_upd ON %1$s', t);
+    EXECUTE format('DROP POLICY IF EXISTS p_%1$s_del ON %1$s', t);
+    EXECUTE format('CREATE POLICY p_%1$s_sel ON %1$s FOR SELECT USING (tenant_id = current_tenant_id());
+                     CREATE POLICY p_%1$s_ins ON %1$s FOR INSERT WITH CHECK (tenant_id = current_tenant_id());
+                     CREATE POLICY p_%1$s_upd ON %1$s FOR UPDATE USING (tenant_id = current_tenant_id());
+                     CREATE POLICY p_%1$s_del ON %1$s FOR DELETE USING (tenant_id = current_tenant_id());', t);
+  END LOOP;
+END $$;
+
+-- ---------------------------------------------------------------------------
+-- 9. Semillas para el tenant demo
+-- ---------------------------------------------------------------------------
+SET LOCAL app.current_tenant = '00000000-0000-0000-0000-000000000001';
+
+INSERT INTO tc_tipos_movimiento_pedido (tenant_id, clave, titulo, se_factura) VALUES
+  ('00000000-0000-0000-0000-000000000001', 'pedido', 'Pedido facturable a cliente', true),
+  ('00000000-0000-0000-0000-000000000001', 'servicio_interno', 'Servicio interno (no factura)', false),
+  ('00000000-0000-0000-0000-000000000001', 'orden_servicio', 'Orden de servicio', true)
+ON CONFLICT DO NOTHING;
+
+INSERT INTO tc_tipos_complejidad (tenant_id, clave, titulo, factor_costo) VALUES
+  ('00000000-0000-0000-0000-000000000001', 'foro_sol_1d', 'Foro Sol - 1 Día de Show', 1.00),
+  ('00000000-0000-0000-0000-000000000001', 'foro_sol_2d', 'Foro Sol - 2 Días de Show', 1.20),
+  ('00000000-0000-0000-0000-000000000001', 'palacio_1d',  'Palacio de los Deportes - 1 Día', 0.90),
+  ('00000000-0000-0000-0000-000000000001', 'auditorio_1d','Auditorio Nacional - 1 Día', 0.85),
+  ('00000000-0000-0000-0000-000000000001', 'teatro_1d',   'Teatro - 1 Día', 0.70),
+  ('00000000-0000-0000-0000-000000000001', 'evento_gral', 'Evento genérico', 1.00)
+ON CONFLICT DO NOTHING;
+
+INSERT INTO tc_tipos_duracion_evento (tenant_id, clave, titulo, dias_minimos, dias_maximos) VALUES
+  ('00000000-0000-0000-0000-000000000001', 'un_dia',      '1 Día',       1, 1),
+  ('00000000-0000-0000-0000-000000000001', 'dos_dias',    '2 Días',      2, 2),
+  ('00000000-0000-0000-0000-000000000001', 'fin_semana',  'Fin de semana', 2, 3),
+  ('00000000-0000-0000-0000-000000000001', 'semana',      '1 Semana',    5, 7),
+  ('00000000-0000-0000-0000-000000000001', 'quincena',    'Quincena',    10, 15),
+  ('00000000-0000-0000-0000-000000000001', 'mes',         '1 Mes',       20, 31)
+ON CONFLICT DO NOTHING;
+
+-- ============================================================================
+-- Migración 003b_reclutamiento_completo
+-- ============================================================================
+-- ============================================================================
+-- Migration 003b — Reclutamiento completo (portal público + funnel RRHH)
+-- ============================================================================
+
+-- Enums
+DO $$ BEGIN
+  CREATE TYPE estado_postulacion_full_enum AS ENUM (
+    'postulado', 'recepcion_pendiente', 'recepcion_ok', 'entrevista_grupal_agendada',
+    'entrevista_individual', 'aceptado', 'rechazado', 'en_curso_induccion',
+    'en_evento_prueba', 'listo_alta', 'promovido', 'desistio'
+  );
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+DO $$ BEGIN
+  CREATE TYPE resultado_postulacion_enum AS ENUM (
+    'en_proceso', 'aceptado_curso', 'aceptado_evento_prueba', 'promovido_empleado',
+    'rechazado_perfil', 'rechazado_documentacion', 'rechazado_evaluacion', 'desistio_candidato'
+  );
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+-- ---------------------------------------------------------------------------
+-- 1. te_vacantes → separar en plantilla + publicación
+-- ---------------------------------------------------------------------------
+
+-- Plantilla reutilizable de vacante
+CREATE TABLE IF NOT EXISTS te_vacante_plantilla (
+  id                uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  tenant_id         uuid NOT NULL REFERENCES te_tenants(id) ON DELETE CASCADE,
+  codigo            text,
+  titulo            text NOT NULL,
+  descripcion       text,
+  puesto_id         uuid NOT NULL REFERENCES tc_puestos(id),
+  requiere_ingles   boolean NOT NULL DEFAULT false,
+  requiere_experiencia boolean NOT NULL DEFAULT false,
+  funciones         text,
+  requisitos        text,
+  sexo_requerido    sexo_enum,
+  edad_minima       int,
+  edad_maxima       int,
+  salario_base      numeric(12,2),
+  activa            boolean NOT NULL DEFAULT true,
+  creado_en timestamptz NOT NULL DEFAULT now(), creado_por uuid,
+  modificado_en timestamptz NOT NULL DEFAULT now(), modificado_por uuid,
+  UNIQUE (tenant_id, codigo)
+);
+DROP TRIGGER IF EXISTS tg_aud_vplant ON te_vacante_plantilla;
+CREATE TRIGGER tg_aud_vplant BEFORE INSERT OR UPDATE ON te_vacante_plantilla
+  FOR EACH ROW EXECUTE FUNCTION tg_auditoria();
+
+-- Ligar te_vacantes existentes (publicaciones) a plantilla
+ALTER TABLE te_vacantes
+  ADD COLUMN IF NOT EXISTS plantilla_id     uuid REFERENCES te_vacante_plantilla(id),
+  ADD COLUMN IF NOT EXISTS fecha_publicacion date,
+  ADD COLUMN IF NOT EXISTS fecha_termino     date,
+  ADD COLUMN IF NOT EXISTS cupo_maximo       int,
+  ADD COLUMN IF NOT EXISTS postulados_actual int NOT NULL DEFAULT 0;
+
+-- ---------------------------------------------------------------------------
+-- 2. Grupos de citas + relación N:N candidato-grupo
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS te_grupos_citas (
+  id                    uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  tenant_id             uuid NOT NULL REFERENCES te_tenants(id) ON DELETE CASCADE,
+  vacante_publicacion_id uuid REFERENCES te_vacantes(id) ON DELETE CASCADE,
+  fecha_cita            date NOT NULL,
+  hora_inicio           time NOT NULL,
+  hora_fin              time,
+  sitio_id              uuid REFERENCES tc_sitios(id),
+  cupo_maximo           int NOT NULL DEFAULT 20,
+  cupo_actual           int NOT NULL DEFAULT 0,
+  estatus               text NOT NULL DEFAULT 'vigente',    -- vigente | cancelado | terminado
+  responsable_id        uuid REFERENCES tc_responsables(id),
+  observaciones         text,
+  creado_en timestamptz NOT NULL DEFAULT now(), creado_por uuid,
+  modificado_en timestamptz NOT NULL DEFAULT now(), modificado_por uuid
+);
+CREATE INDEX IF NOT EXISTS ix_gc_fecha ON te_grupos_citas(tenant_id, fecha_cita);
+DROP TRIGGER IF EXISTS tg_aud_gc ON te_grupos_citas;
+CREATE TRIGGER tg_aud_gc BEFORE INSERT OR UPDATE ON te_grupos_citas
+  FOR EACH ROW EXECUTE FUNCTION tg_auditoria();
+
+CREATE TABLE IF NOT EXISTS tr_cita_grupo_candidato (
+  id              uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  tenant_id       uuid NOT NULL REFERENCES te_tenants(id) ON DELETE CASCADE,
+  grupo_cita_id   uuid NOT NULL REFERENCES te_grupos_citas(id) ON DELETE CASCADE,
+  candidato_id    uuid NOT NULL REFERENCES te_candidatos(id) ON DELETE CASCADE,
+  asistio         boolean NOT NULL DEFAULT false,
+  doc_completa    boolean NOT NULL DEFAULT false,
+  continua_proceso boolean NOT NULL DEFAULT true,
+  observaciones   text,
+  agendado_en     timestamptz NOT NULL DEFAULT now(),
+  confirmado_en   timestamptz,
+  creado_en timestamptz NOT NULL DEFAULT now(), creado_por uuid,
+  modificado_en timestamptz NOT NULL DEFAULT now(), modificado_por uuid,
+  UNIQUE (tenant_id, grupo_cita_id, candidato_id)
+);
+DROP TRIGGER IF EXISTS tg_aud_trcgc ON tr_cita_grupo_candidato;
+CREATE TRIGGER tg_aud_trcgc BEFORE INSERT OR UPDATE ON tr_cita_grupo_candidato
+  FOR EACH ROW EXECUTE FUNCTION tg_auditoria();
+
+-- ---------------------------------------------------------------------------
+-- 3. Eventos prueba (separados de eventos operativos)
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS te_eventos_prueba (
+  id                    uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  tenant_id             uuid NOT NULL REFERENCES te_tenants(id) ON DELETE CASCADE,
+  titulo                text NOT NULL,
+  fecha                 date NOT NULL,
+  hora_cita             time,
+  sitio_id              uuid REFERENCES tc_sitios(id),
+  puesto_id             uuid REFERENCES tc_puestos(id),
+  cupo_maximo           int NOT NULL DEFAULT 15,
+  responsable_id        uuid REFERENCES tc_responsables(id),
+  observaciones         text,
+  creado_en timestamptz NOT NULL DEFAULT now(), creado_por uuid,
+  modificado_en timestamptz NOT NULL DEFAULT now(), modificado_por uuid
+);
+DROP TRIGGER IF EXISTS tg_aud_evprb ON te_eventos_prueba;
+CREATE TRIGGER tg_aud_evprb BEFORE INSERT OR UPDATE ON te_eventos_prueba
+  FOR EACH ROW EXECUTE FUNCTION tg_auditoria();
+
+-- ---------------------------------------------------------------------------
+-- 4. Intentos de acceso al portal público (rate-limit anti-bot)
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS te_intentos_acceso_portal (
+  id            uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  tenant_id     uuid NOT NULL REFERENCES te_tenants(id) ON DELETE CASCADE,
+  candidato_id  uuid REFERENCES te_candidatos(id),
+  ip            inet,
+  user_agent    text,
+  accion        text NOT NULL,    -- 've_vacantes','postularse','agenda_cita','completa_perfil'
+  exito         boolean NOT NULL DEFAULT true,
+  registro_en   timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS ix_iap_ip_ts ON te_intentos_acceso_portal(ip, registro_en DESC);
+CREATE INDEX IF NOT EXISTS ix_iap_cand ON te_intentos_acceso_portal(candidato_id, registro_en DESC);
+
+-- ---------------------------------------------------------------------------
+-- 5. Refactor tr_postulacion_candidato_vacante — de jsonb a campos discretos
+-- ---------------------------------------------------------------------------
+-- Agregamos campos discretos manteniendo evaluacion jsonb para compatibilidad
+ALTER TABLE tr_postulacion_candidato_vacante
+  ADD COLUMN IF NOT EXISTS estatus_full             estado_postulacion_full_enum NOT NULL DEFAULT 'postulado',
+  ADD COLUMN IF NOT EXISTS resultado                resultado_postulacion_enum NOT NULL DEFAULT 'en_proceso',
+  ADD COLUMN IF NOT EXISTS asis_recepcion           boolean,
+  ADD COLUMN IF NOT EXISTS doc_completa             boolean,
+  ADD COLUMN IF NOT EXISTS continua                 boolean,
+  ADD COLUMN IF NOT EXISTS continua_obs             text,
+  ADD COLUMN IF NOT EXISTS doc_psicometrico_url     text,
+  ADD COLUMN IF NOT EXISTS psicometrico_obs         text,
+  ADD COLUMN IF NOT EXISTS entrevista_obs           text,
+  ADD COLUMN IF NOT EXISTS curso_induccion_id       uuid REFERENCES te_cursos_induccion(id),
+  ADD COLUMN IF NOT EXISTS asis_curso_induccion     boolean,
+  ADD COLUMN IF NOT EXISTS calif_curso_induccion    numeric(4,1),
+  ADD COLUMN IF NOT EXISTS obs_curso_induccion      text,
+  ADD COLUMN IF NOT EXISTS evento_prueba_id         uuid REFERENCES te_eventos_prueba(id),
+  ADD COLUMN IF NOT EXISTS asis_evento_prueba       boolean,
+  ADD COLUMN IF NOT EXISTS calif_evento_prueba      numeric(4,1),
+  ADD COLUMN IF NOT EXISTS obs_evento_prueba        text,
+  ADD COLUMN IF NOT EXISTS fecha_registro           timestamptz NOT NULL DEFAULT now(),
+  ADD COLUMN IF NOT EXISTS fecha_cierre             timestamptz;
+
+-- ---------------------------------------------------------------------------
+-- 6. Función: postular candidato (portal público)
+-- ---------------------------------------------------------------------------
+CREATE OR REPLACE FUNCTION postular_a_vacante(
+  p_tenant uuid,
+  p_vacante_publicacion uuid,
+  p_nombres text, p_apellido_paterno text, p_apellido_materno text,
+  p_rfc text, p_curp text, p_correo text, p_telefono text,
+  p_ip inet DEFAULT NULL, p_user_agent text DEFAULT NULL
+) RETURNS uuid AS $$
+DECLARE cand_id uuid; postul_id uuid; existente uuid;
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM te_vacantes v
+    WHERE v.id = p_vacante_publicacion AND v.tenant_id = p_tenant
+      AND v.estado = 'publicada'
+      AND (v.fecha_termino IS NULL OR v.fecha_termino >= CURRENT_DATE))
+  THEN RAISE EXCEPTION 'Vacante no disponible.'; END IF;
+
+  SELECT id INTO existente FROM te_candidatos WHERE tenant_id = p_tenant AND (rfc = p_rfc OR curp = p_curp) LIMIT 1;
+  IF existente IS NOT NULL THEN
+    cand_id := existente;
+  ELSE
+    INSERT INTO te_candidatos (tenant_id, nombres, apellido_paterno, apellido_materno,
+                               rfc, curp, correo, telefono)
+    VALUES (p_tenant, p_nombres, p_apellido_paterno, p_apellido_materno,
+            p_rfc, p_curp, p_correo, p_telefono)
+    RETURNING id INTO cand_id;
+  END IF;
+
+  INSERT INTO tr_postulacion_candidato_vacante
+    (tenant_id, vacante_id, candidato_id, estado, estatus_full, resultado)
+  VALUES (p_tenant, p_vacante_publicacion, cand_id, 'recibida', 'postulado', 'en_proceso')
+  ON CONFLICT (tenant_id, vacante_id, candidato_id) DO NOTHING
+  RETURNING id INTO postul_id;
+
+  UPDATE te_vacantes SET postulados_actual = postulados_actual + 1 WHERE id = p_vacante_publicacion;
+
+  INSERT INTO te_intentos_acceso_portal (tenant_id, candidato_id, ip, user_agent, accion, exito)
+    VALUES (p_tenant, cand_id, p_ip, p_user_agent, 'postularse', true);
+  RETURN COALESCE(postul_id, cand_id);
+END $$ LANGUAGE plpgsql SECURITY DEFINER;
+
+GRANT EXECUTE ON FUNCTION postular_a_vacante(uuid,uuid,text,text,text,text,text,text,text,inet,text) TO anon, authenticated;
+
+-- Función: agendar entrevista grupal (después de postularse)
+CREATE OR REPLACE FUNCTION agendar_entrevista_grupal(
+  p_tenant uuid, p_candidato uuid, p_grupo_cita uuid
+) RETURNS uuid AS $$
+DECLARE cupo_max int; cupo_act int; nuevo uuid;
+BEGIN
+  SELECT cupo_maximo, cupo_actual INTO cupo_max, cupo_act FROM te_grupos_citas WHERE id = p_grupo_cita AND tenant_id = p_tenant;
+  IF cupo_max IS NULL THEN RAISE EXCEPTION 'Grupo cita no existe.'; END IF;
+  IF cupo_act >= cupo_max THEN RAISE EXCEPTION 'Grupo cita lleno (%/%)', cupo_act, cupo_max; END IF;
+  INSERT INTO tr_cita_grupo_candidato (tenant_id, grupo_cita_id, candidato_id)
+    VALUES (p_tenant, p_grupo_cita, p_candidato)
+    ON CONFLICT DO NOTHING
+    RETURNING id INTO nuevo;
+  IF nuevo IS NULL THEN RAISE EXCEPTION 'El candidato ya está agendado en este grupo.'; END IF;
+  UPDATE te_grupos_citas SET cupo_actual = cupo_actual + 1 WHERE id = p_grupo_cita;
+  UPDATE tr_postulacion_candidato_vacante
+    SET estatus_full = 'entrevista_grupal_agendada'
+    WHERE candidato_id = p_candidato AND tenant_id = p_tenant AND estatus_full = 'postulado';
+  RETURN nuevo;
+END $$ LANGUAGE plpgsql SECURITY DEFINER;
+GRANT EXECUTE ON FUNCTION agendar_entrevista_grupal(uuid,uuid,uuid) TO anon, authenticated;
+
+-- ---------------------------------------------------------------------------
+-- 7. GRANTS + RLS para las nuevas
+-- ---------------------------------------------------------------------------
+ALTER TABLE te_vacante_plantilla         ENABLE ROW LEVEL SECURITY;
+ALTER TABLE te_grupos_citas              ENABLE ROW LEVEL SECURITY;
+ALTER TABLE tr_cita_grupo_candidato      ENABLE ROW LEVEL SECURITY;
+ALTER TABLE te_eventos_prueba            ENABLE ROW LEVEL SECURITY;
+ALTER TABLE te_intentos_acceso_portal    ENABLE ROW LEVEL SECURITY;
+
+DO $$
+DECLARE t text;
+BEGIN
+  FOREACH t IN ARRAY ARRAY['te_vacante_plantilla','te_grupos_citas','tr_cita_grupo_candidato',
+                            'te_eventos_prueba','te_intentos_acceso_portal'] LOOP
+    EXECUTE format('DROP POLICY IF EXISTS p_%1$s_sel ON %1$s', t);
+    EXECUTE format('DROP POLICY IF EXISTS p_%1$s_ins ON %1$s', t);
+    EXECUTE format('DROP POLICY IF EXISTS p_%1$s_upd ON %1$s', t);
+    EXECUTE format('DROP POLICY IF EXISTS p_%1$s_del ON %1$s', t);
+    EXECUTE format('CREATE POLICY p_%1$s_sel ON %1$s FOR SELECT USING (tenant_id = current_tenant_id());
+                     CREATE POLICY p_%1$s_ins ON %1$s FOR INSERT WITH CHECK (tenant_id = current_tenant_id());
+                     CREATE POLICY p_%1$s_upd ON %1$s FOR UPDATE USING (tenant_id = current_tenant_id());
+                     CREATE POLICY p_%1$s_del ON %1$s FOR DELETE USING (tenant_id = current_tenant_id());', t);
+  END LOOP;
+END $$;
+
+GRANT ALL ON te_vacante_plantilla, te_grupos_citas, tr_cita_grupo_candidato,
+             te_eventos_prueba, te_intentos_acceso_portal
+  TO anon, authenticated, service_role;
+
+-- Portal público: permitir SELECT anónimo en vacantes publicadas vigentes
+CREATE OR REPLACE VIEW v_vacantes_publicas AS
+SELECT
+  v.id, v.tenant_id, v.titulo, v.descripcion, v.fecha_publicacion, v.fecha_termino,
+  v.vacantes_cnt, v.cupo_maximo, v.postulados_actual,
+  p.titulo AS puesto,
+  s.titulo AS sitio,
+  c.razon_social AS cliente
+FROM te_vacantes v
+LEFT JOIN tc_puestos p ON p.id = v.puesto_id
+LEFT JOIN tc_sitios s  ON s.id = v.sitio_id
+LEFT JOIN tc_clientes c ON c.id = v.cliente_id
+WHERE v.estado = 'publicada'
+  AND (v.fecha_termino IS NULL OR v.fecha_termino >= CURRENT_DATE)
+  AND (v.cupo_maximo IS NULL OR v.postulados_actual < v.cupo_maximo);
+GRANT SELECT ON v_vacantes_publicas TO anon, authenticated;
+
+-- Grupos de citas disponibles para una vacante
+CREATE OR REPLACE VIEW v_grupos_citas_disponibles AS
+SELECT gc.*, (gc.cupo_maximo - gc.cupo_actual) AS lugares_libres
+FROM te_grupos_citas gc
+WHERE gc.estatus = 'vigente'
+  AND gc.fecha_cita >= CURRENT_DATE
+  AND gc.cupo_actual < gc.cupo_maximo;
+GRANT SELECT ON v_grupos_citas_disponibles TO anon, authenticated;
+
+-- ============================================================================
+-- Migración 003c_fiscal_completo
+-- ============================================================================
+-- ============================================================================
+-- Migration 003c — Fiscal completo (facturación + pagos + honorarios + SAP)
+-- ============================================================================
+
+-- Enums
+DO $$ BEGIN
+  CREATE TYPE metodo_pago_enum AS ENUM ('efectivo','cheque','transferencia','tarjeta','otro');
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+DO $$ BEGIN
+  CREATE TYPE status_factura_enum AS ENUM ('borrador','emitida','pagada_parcial','pagada','cancelada');
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+-- ---------------------------------------------------------------------------
+-- 1. Cuentas bancarias múltiples por empleado (histórico)
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS te_cuentas_bancarias_empleado (
+  id                  uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  tenant_id           uuid NOT NULL REFERENCES te_tenants(id) ON DELETE CASCADE,
+  empleado_id         uuid NOT NULL REFERENCES te_empleados(id) ON DELETE CASCADE,
+  banco_id            uuid REFERENCES tc_bancos(id),
+  numero_cuenta       text NOT NULL,
+  clabe               text,
+  tarjeta_debito      text,
+  titular_nombre      text,
+  es_principal        boolean NOT NULL DEFAULT false,
+  vigente_desde       date NOT NULL DEFAULT CURRENT_DATE,
+  vigente_hasta       date,
+  activo              boolean NOT NULL DEFAULT true,
+  observaciones       text,
+  creado_en timestamptz NOT NULL DEFAULT now(), creado_por uuid,
+  modificado_en timestamptz NOT NULL DEFAULT now(), modificado_por uuid
+);
+CREATE INDEX IF NOT EXISTS ix_ctas_emp ON te_cuentas_bancarias_empleado(tenant_id, empleado_id, es_principal);
+DROP TRIGGER IF EXISTS tg_aud_ctas ON te_cuentas_bancarias_empleado;
+CREATE TRIGGER tg_aud_ctas BEFORE INSERT OR UPDATE ON te_cuentas_bancarias_empleado
+  FOR EACH ROW EXECUTE FUNCTION tg_auditoria();
+
+-- Request de cambio de cuenta (con aprobación)
+CREATE TABLE IF NOT EXISTS te_cambio_cuenta_bancaria (
+  id                  uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  tenant_id           uuid NOT NULL REFERENCES te_tenants(id) ON DELETE CASCADE,
+  empleado_id         uuid NOT NULL REFERENCES te_empleados(id) ON DELETE CASCADE,
+  banco_id_nuevo      uuid REFERENCES tc_bancos(id),
+  numero_cuenta_nuevo text,
+  clabe_nueva         text,
+  motivo              text,
+  status              text NOT NULL DEFAULT 'pendiente',    -- pendiente | aprobado | rechazado
+  solicitado_en       timestamptz NOT NULL DEFAULT now(),
+  aprobado_por        uuid,
+  aprobado_en         timestamptz,
+  observaciones       text,
+  creado_en timestamptz NOT NULL DEFAULT now(), creado_por uuid,
+  modificado_en timestamptz NOT NULL DEFAULT now(), modificado_por uuid
+);
+DROP TRIGGER IF EXISTS tg_aud_ccb ON te_cambio_cuenta_bancaria;
+CREATE TRIGGER tg_aud_ccb BEFORE INSERT OR UPDATE ON te_cambio_cuenta_bancaria
+  FOR EACH ROW EXECUTE FUNCTION tg_auditoria();
+
+-- ---------------------------------------------------------------------------
+-- 2. Series de folio de factura por sociedad propia
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS te_facturas_serie (
+  id                    uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  tenant_id             uuid NOT NULL REFERENCES te_tenants(id) ON DELETE CASCADE,
+  sociedad_propia_id    uuid NOT NULL REFERENCES tc_sociedades_propias(id),
+  tipo_movimiento_id    uuid REFERENCES tc_tipos_movimiento_pedido(id),
+  serie                 text NOT NULL,
+  ultimo_folio          int NOT NULL DEFAULT 0,
+  prefijo_titulo        text,          -- ej: 'Lobo Factura No.'
+  activo                boolean NOT NULL DEFAULT true,
+  creado_en timestamptz NOT NULL DEFAULT now(), creado_por uuid,
+  modificado_en timestamptz NOT NULL DEFAULT now(), modificado_por uuid,
+  UNIQUE (tenant_id, sociedad_propia_id, tipo_movimiento_id, serie)
+);
+DROP TRIGGER IF EXISTS tg_aud_fserie ON te_facturas_serie;
+CREATE TRIGGER tg_aud_fserie BEFORE INSERT OR UPDATE ON te_facturas_serie
+  FOR EACH ROW EXECUTE FUNCTION tg_auditoria();
+
+-- Enriquecer te_facturas_enc con campos del sistema Lobo
+ALTER TABLE te_facturas_enc
+  ADD COLUMN IF NOT EXISTS serie_id            uuid REFERENCES te_facturas_serie(id),
+  ADD COLUMN IF NOT EXISTS tipo_movimiento_id  uuid REFERENCES tc_tipos_movimiento_pedido(id),
+  ADD COLUMN IF NOT EXISTS pedido_id           uuid REFERENCES te_pedidos(id),
+  ADD COLUMN IF NOT EXISTS contacto_nombre     text,
+  ADD COLUMN IF NOT EXISTS contacto_telefono   text,
+  ADD COLUMN IF NOT EXISTS status_full         status_factura_enum NOT NULL DEFAULT 'borrador',
+  ADD COLUMN IF NOT EXISTS numero_material_sap text,
+  ADD COLUMN IF NOT EXISTS pep_id              uuid REFERENCES tc_partidas_presupuestales(id),
+  ADD COLUMN IF NOT EXISTS lugar_cita_id       uuid REFERENCES tc_sitios(id),
+  ADD COLUMN IF NOT EXISTS titulo_completo     text,
+  ADD COLUMN IF NOT EXISTS enviada_sap_en      timestamptz;
+
+-- Enriquecer te_facturas_det (partida)
+ALTER TABLE te_facturas_det
+  ADD COLUMN IF NOT EXISTS tipo_partida        text NOT NULL DEFAULT 'pedido_detalle',  -- pedido_detalle | texto_libre | agrupada
+  ADD COLUMN IF NOT EXISTS producto_id         uuid REFERENCES tc_productos(id),
+  ADD COLUMN IF NOT EXISTS turnos              numeric(5,2) DEFAULT 0,
+  ADD COLUMN IF NOT EXISTS iva                 numeric(14,2) DEFAULT 0,
+  ADD COLUMN IF NOT EXISTS agrupa_de_partidas  jsonb;   -- ids de partidas agrupadas
+
+-- ---------------------------------------------------------------------------
+-- 3. Pagos parciales de factura
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS te_pagos_factura (
+  id                  uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  tenant_id           uuid NOT NULL REFERENCES te_tenants(id) ON DELETE CASCADE,
+  factura_id          uuid NOT NULL REFERENCES te_facturas_enc(id) ON DELETE CASCADE,
+  monto               numeric(14,2) NOT NULL,
+  metodo              metodo_pago_enum NOT NULL,
+  referencia          text,           -- número de cheque o transferencia
+  banco               text,
+  fecha_pago          date NOT NULL DEFAULT CURRENT_DATE,
+  observaciones       text,
+  creado_en timestamptz NOT NULL DEFAULT now(), creado_por uuid,
+  modificado_en timestamptz NOT NULL DEFAULT now(), modificado_por uuid,
+  CHECK (monto > 0),
+  CHECK (metodo IN ('efectivo','tarjeta','otro') OR (referencia IS NOT NULL AND length(referencia) > 0))
+);
+CREATE INDEX IF NOT EXISTS ix_pgfa ON te_pagos_factura(tenant_id, factura_id);
+DROP TRIGGER IF EXISTS tg_aud_pgfa ON te_pagos_factura;
+CREATE TRIGGER tg_aud_pgfa BEFORE INSERT OR UPDATE ON te_pagos_factura
+  FOR EACH ROW EXECUTE FUNCTION tg_auditoria();
+
+-- Trigger: cuando el pago acumulado ≥ total → status 'pagada'
+CREATE OR REPLACE FUNCTION tg_pagofact_update_status() RETURNS trigger AS $$
+DECLARE tot numeric; pagado numeric;
+BEGIN
+  SELECT total INTO tot FROM te_facturas_enc WHERE id = NEW.factura_id;
+  SELECT COALESCE(sum(monto), 0) INTO pagado FROM te_pagos_factura WHERE factura_id = NEW.factura_id;
+  IF pagado >= tot THEN
+    UPDATE te_facturas_enc SET status_full = 'pagada', status = 'pagada' WHERE id = NEW.factura_id;
+  ELSIF pagado > 0 THEN
+    UPDATE te_facturas_enc SET status_full = 'pagada_parcial' WHERE id = NEW.factura_id;
+  END IF;
+  RETURN NEW;
+END $$ LANGUAGE plpgsql;
+DROP TRIGGER IF EXISTS tg_pgfa_status ON te_pagos_factura;
+CREATE TRIGGER tg_pgfa_status AFTER INSERT ON te_pagos_factura
+  FOR EACH ROW EXECUTE FUNCTION tg_pagofact_update_status();
+
+-- ---------------------------------------------------------------------------
+-- 4. Export SAP por lote
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS te_export_sap_lote (
+  id                    uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  tenant_id             uuid NOT NULL REFERENCES te_tenants(id) ON DELETE CASCADE,
+  sociedad_propia_id    uuid NOT NULL REFERENCES tc_sociedades_propias(id),
+  folio_desde           int NOT NULL,
+  folio_hasta           int NOT NULL,
+  cnt_facturas          int NOT NULL DEFAULT 0,
+  archivo_txt_url       text,
+  enviado_a_email       text,
+  enviado_en            timestamptz,
+  status                text NOT NULL DEFAULT 'pendiente',   -- pendiente | generado | enviado | error
+  error_msg             text,
+  creado_en timestamptz NOT NULL DEFAULT now(), creado_por uuid,
+  modificado_en timestamptz NOT NULL DEFAULT now(), modificado_por uuid,
+  CHECK (folio_hasta >= folio_desde)
+);
+DROP TRIGGER IF EXISTS tg_aud_esap ON te_export_sap_lote;
+CREATE TRIGGER tg_aud_esap BEFORE INSERT OR UPDATE ON te_export_sap_lote
+  FOR EACH ROW EXECUTE FUNCTION tg_auditoria();
+
+-- ---------------------------------------------------------------------------
+-- 5. Enriquecer te_pagos_dispersion (pagos honorarios) con conceptos fiscales
+-- ---------------------------------------------------------------------------
+ALTER TABLE te_pagos_dispersion
+  ADD COLUMN IF NOT EXISTS regimen              regimen_pago_enum,
+  ADD COLUMN IF NOT EXISTS periodo_id           uuid REFERENCES te_nominas_periodo(id),
+  ADD COLUMN IF NOT EXISTS dias_laborados       numeric(5,2),
+  ADD COLUMN IF NOT EXISTS pago_bruto           numeric(14,2),
+  -- Conceptos fiscales (10) del sistema Lobo
+  ADD COLUMN IF NOT EXISTS sdp                  numeric(14,2),   -- Salario Diario Promedio
+  ADD COLUMN IF NOT EXISTS im                   numeric(14,2),
+  ADD COLUMN IF NOT EXISTS cf                   numeric(14,2),
+  ADD COLUMN IF NOT EXISTS sa                   numeric(14,2),
+  ADD COLUMN IF NOT EXISTS cg                   numeric(14,2),
+  ADD COLUMN IF NOT EXISTS impuesto_diario      numeric(14,2),
+  ADD COLUMN IF NOT EXISTS it                   numeric(14,2),
+  ADD COLUMN IF NOT EXISTS iva                  numeric(14,2),
+  ADD COLUMN IF NOT EXISTS riva                 numeric(14,2),
+  ADD COLUMN IF NOT EXISTS risr                 numeric(14,2),
+  ADD COLUMN IF NOT EXISTS pago_neto            numeric(14,2),
+  -- 4 validaciones "cumple regla"
+  ADD COLUMN IF NOT EXISTS cumple_reglas               boolean NOT NULL DEFAULT false,
+  ADD COLUMN IF NOT EXISTS cumple_regla_banco          boolean NOT NULL DEFAULT false,
+  ADD COLUMN IF NOT EXISTS cumple_regla_ultimo_pago    boolean NOT NULL DEFAULT false,
+  ADD COLUMN IF NOT EXISTS cumple_regla_recibe_periodo boolean NOT NULL DEFAULT false,
+  -- Auditoría fiscal
+  ADD COLUMN IF NOT EXISTS empresa_pagadora_id  uuid REFERENCES tc_sociedades_pagadoras(id),
+  ADD COLUMN IF NOT EXISTS puesto_principal_id  uuid REFERENCES tc_puestos(id),
+  ADD COLUMN IF NOT EXISTS unidad_negocio_id    uuid REFERENCES tc_unidades_negocio(id),
+  ADD COLUMN IF NOT EXISTS sociedad_propia_id   uuid REFERENCES tc_sociedades_propias(id),
+  ADD COLUMN IF NOT EXISTS solicitud_pago       text,
+  ADD COLUMN IF NOT EXISTS observaciones        text;
+
+-- ---------------------------------------------------------------------------
+-- 6. Sueldos matriciales (tabulador)
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS tp_sueldos_matriciales (
+  id                    uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  tenant_id             uuid NOT NULL REFERENCES te_tenants(id) ON DELETE CASCADE,
+  puesto_id             uuid NOT NULL REFERENCES tc_puestos(id),
+  tipo_complejidad_id   uuid REFERENCES tc_tipos_complejidad(id),
+  tipo_duracion_id      uuid REFERENCES tc_tipos_duracion_evento(id),
+  turnos                numeric(5,2) NOT NULL DEFAULT 1,
+  sueldo_base           numeric(12,2) NOT NULL,
+  factor                numeric(5,3) NOT NULL DEFAULT 1.0,
+  vigente_desde         date NOT NULL DEFAULT CURRENT_DATE,
+  vigente_hasta         date,
+  activo                boolean NOT NULL DEFAULT true,
+  creado_en timestamptz NOT NULL DEFAULT now(), creado_por uuid,
+  modificado_en timestamptz NOT NULL DEFAULT now(), modificado_por uuid
+);
+CREATE INDEX IF NOT EXISTS ix_smx ON tp_sueldos_matriciales(tenant_id, puesto_id, vigente_desde);
+DROP TRIGGER IF EXISTS tg_aud_smx ON tp_sueldos_matriciales;
+CREATE TRIGGER tg_aud_smx BEFORE INSERT OR UPDATE ON tp_sueldos_matriciales
+  FOR EACH ROW EXECUTE FUNCTION tg_auditoria();
+
+-- ---------------------------------------------------------------------------
+-- 7. Catálogo estático de precauciones de nómina
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS tp_nomina_precauciones_catalogo (
+  id                uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  tenant_id         uuid NOT NULL REFERENCES te_tenants(id) ON DELETE CASCADE,
+  clave             text NOT NULL,
+  mensaje           text NOT NULL,
+  responsable_area  text,
+  activo            boolean NOT NULL DEFAULT true,
+  creado_en timestamptz NOT NULL DEFAULT now(), creado_por uuid,
+  modificado_en timestamptz NOT NULL DEFAULT now(), modificado_por uuid,
+  UNIQUE (tenant_id, clave)
+);
+DROP TRIGGER IF EXISTS tg_aud_prec ON tp_nomina_precauciones_catalogo;
+CREATE TRIGGER tg_aud_prec BEFORE INSERT OR UPDATE ON tp_nomina_precauciones_catalogo
+  FOR EACH ROW EXECUTE FUNCTION tg_auditoria();
+
+-- ---------------------------------------------------------------------------
+-- 8. Función: obtener siguiente folio de factura por serie
+-- ---------------------------------------------------------------------------
+CREATE OR REPLACE FUNCTION siguiente_folio_factura(p_serie uuid) RETURNS int AS $$
+DECLARE nuevo int;
+BEGIN
+  UPDATE te_facturas_serie SET ultimo_folio = ultimo_folio + 1, modificado_en = now()
+    WHERE id = p_serie
+    RETURNING ultimo_folio INTO nuevo;
+  IF nuevo IS NULL THEN RAISE EXCEPTION 'Serie de factura no existe.'; END IF;
+  RETURN nuevo;
+END $$ LANGUAGE plpgsql;
+
+-- Función: crear factura desde selección de pedidos_detalle facturables
+CREATE OR REPLACE FUNCTION crear_factura_desde_detalles(
+  p_tenant uuid,
+  p_pedido uuid,
+  p_sociedad_propia uuid,
+  p_tipo_movimiento uuid,
+  p_serie uuid,
+  p_detalles_ids uuid[]
+) RETURNS uuid AS $$
+DECLARE
+  cliente_id_var uuid; folio_nuevo int; nueva_fact uuid;
+  fila record; precio_unit numeric; imp numeric;
+  subt numeric := 0; ivt numeric := 0;
+BEGIN
+  SELECT cliente_id INTO cliente_id_var FROM te_pedidos WHERE id = p_pedido AND tenant_id = p_tenant;
+  IF cliente_id_var IS NULL THEN RAISE EXCEPTION 'Pedido no existe o sin cliente.'; END IF;
+
+  folio_nuevo := siguiente_folio_factura(p_serie);
+  INSERT INTO te_facturas_enc (
+    tenant_id, folio, serie_id, tipo_movimiento_id, pedido_id, cliente_id,
+    sociedad_propia_id, fecha_emision, status_full, status
+  ) VALUES (
+    p_tenant, folio_nuevo, p_serie, p_tipo_movimiento, p_pedido, cliente_id_var,
+    p_sociedad_propia, CURRENT_DATE, 'borrador', 'borrador'
+  ) RETURNING id INTO nueva_fact;
+
+  FOR fila IN
+    SELECT pd.id, pd.producto_id, pd.cantidad, pd.turnos, pd.precio
+    FROM te_pedidos_detalle pd
+    WHERE pd.id = ANY(p_detalles_ids) AND pd.pedido_id = p_pedido AND pd.facturable = true
+      AND pd.folio_factura IS NULL
+  LOOP
+    precio_unit := COALESCE(fila.precio,
+      precio_efectivo(fila.producto_id, cliente_id_var, CURRENT_DATE));
+    IF fila.turnos > 0 THEN
+      imp := fila.cantidad * fila.turnos * precio_unit;
+    ELSE
+      imp := fila.cantidad * precio_unit;
+    END IF;
+    INSERT INTO te_facturas_det (
+      tenant_id, factura_id, reservacion_id, tipo_partida, producto_id,
+      concepto, cantidad, turnos, precio_unit, importe, iva
+    ) VALUES (
+      p_tenant, nueva_fact, NULL, 'pedido_detalle', fila.producto_id,
+      'Detalle pedido #' || fila.id::text, fila.cantidad, fila.turnos,
+      precio_unit, imp, imp * 0.16
+    );
+    subt := subt + imp;
+    ivt := ivt + (imp * 0.16);
+    -- marcar detalle como facturado
+    UPDATE te_pedidos_detalle SET folio_factura = folio_nuevo, status_detalle = 'facturado'
+      WHERE id = fila.id;
+  END LOOP;
+
+  UPDATE te_facturas_enc SET subtotal = subt, iva = ivt, total = subt + ivt WHERE id = nueva_fact;
+  RETURN nueva_fact;
+END $$ LANGUAGE plpgsql;
+
+GRANT EXECUTE ON FUNCTION siguiente_folio_factura(uuid),
+                          crear_factura_desde_detalles(uuid,uuid,uuid,uuid,uuid,uuid[])
+  TO anon, authenticated, service_role;
+
+-- ---------------------------------------------------------------------------
+-- 9. RLS + GRANTS
+-- ---------------------------------------------------------------------------
+ALTER TABLE te_cuentas_bancarias_empleado ENABLE ROW LEVEL SECURITY;
+ALTER TABLE te_cambio_cuenta_bancaria     ENABLE ROW LEVEL SECURITY;
+ALTER TABLE te_facturas_serie             ENABLE ROW LEVEL SECURITY;
+ALTER TABLE te_pagos_factura              ENABLE ROW LEVEL SECURITY;
+ALTER TABLE te_export_sap_lote            ENABLE ROW LEVEL SECURITY;
+ALTER TABLE tp_sueldos_matriciales        ENABLE ROW LEVEL SECURITY;
+ALTER TABLE tp_nomina_precauciones_catalogo ENABLE ROW LEVEL SECURITY;
+
+DO $$
+DECLARE t text;
+BEGIN
+  FOREACH t IN ARRAY ARRAY['te_cuentas_bancarias_empleado','te_cambio_cuenta_bancaria',
+                           'te_facturas_serie','te_pagos_factura','te_export_sap_lote',
+                           'tp_sueldos_matriciales','tp_nomina_precauciones_catalogo'] LOOP
+    EXECUTE format('DROP POLICY IF EXISTS p_%1$s_sel ON %1$s', t);
+    EXECUTE format('DROP POLICY IF EXISTS p_%1$s_ins ON %1$s', t);
+    EXECUTE format('DROP POLICY IF EXISTS p_%1$s_upd ON %1$s', t);
+    EXECUTE format('DROP POLICY IF EXISTS p_%1$s_del ON %1$s', t);
+    EXECUTE format('CREATE POLICY p_%1$s_sel ON %1$s FOR SELECT USING (tenant_id = current_tenant_id());
+                     CREATE POLICY p_%1$s_ins ON %1$s FOR INSERT WITH CHECK (tenant_id = current_tenant_id());
+                     CREATE POLICY p_%1$s_upd ON %1$s FOR UPDATE USING (tenant_id = current_tenant_id());
+                     CREATE POLICY p_%1$s_del ON %1$s FOR DELETE USING (tenant_id = current_tenant_id());', t);
+  END LOOP;
+END $$;
+
+GRANT ALL ON te_cuentas_bancarias_empleado, te_cambio_cuenta_bancaria,
+             te_facturas_serie, te_pagos_factura, te_export_sap_lote,
+             tp_sueldos_matriciales, tp_nomina_precauciones_catalogo
+  TO anon, authenticated, service_role;
+
+-- ---------------------------------------------------------------------------
+-- 10. Semillas
+-- ---------------------------------------------------------------------------
+SET LOCAL app.current_tenant = '00000000-0000-0000-0000-000000000001';
+
+-- Series de folio por sociedad (dummy — se completan cuando el tenant real las tenga)
+INSERT INTO tp_nomina_precauciones_catalogo (tenant_id, clave, mensaje, responsable_area) VALUES
+  ('00000000-0000-0000-0000-000000000001', 'sin_banco',     'Empleado sin banco asignado, no se puede dispersar.', 'RRHH'),
+  ('00000000-0000-0000-0000-000000000001', 'sin_clabe',     'Empleado sin CLABE, no se puede dispersar por transferencia.', 'RRHH'),
+  ('00000000-0000-0000-0000-000000000001', 'sin_regimen',   'Empleado sin régimen de pago capturado.', 'RRHH'),
+  ('00000000-0000-0000-0000-000000000001', 'sin_pagadora',  'Empleado sin sociedad pagadora asignada.', 'RRHH'),
+  ('00000000-0000-0000-0000-000000000001', 'ultimo_pago_hace_mucho', 'Empleado sin pagos en los últimos 3 periodos — validar si sigue activo.', 'Nómina'),
+  ('00000000-0000-0000-0000-000000000001', 'reservacion_sin_procesar', 'Existen reservaciones del periodo sin procesar (falta asistencia).', 'Operación'),
+  ('00000000-0000-0000-0000-000000000001', 'penalizacion_pendiente', 'Existen penalizaciones pendientes de aprobar/revertir.', 'Nómina')
+ON CONFLICT DO NOTHING;
+
+-- ============================================================================
+-- Migración 003d_personal_logs_misc
+-- ============================================================================
+-- ============================================================================
+-- Migration 003d — Personal expandido, logs (TL_*), geo, misceláneos
+-- ============================================================================
+
+-- ---------------------------------------------------------------------------
+-- 1. Expandir te_empleados con ~20 campos del sistema Lobo
+-- ---------------------------------------------------------------------------
+ALTER TABLE te_empleados
+  ADD COLUMN IF NOT EXISTS tipo_empleado          text,           -- freelance | staff | interno | eventual
+  ADD COLUMN IF NOT EXISTS porcentaje_puntualidad_global numeric(4,3),
+  -- Dirección desestructurada
+  ADD COLUMN IF NOT EXISTS calle                  text,
+  ADD COLUMN IF NOT EXISTS numero_exterior        text,
+  ADD COLUMN IF NOT EXISTS numero_interior        text,
+  ADD COLUMN IF NOT EXISTS colonia                text,
+  ADD COLUMN IF NOT EXISTS codigo_postal          text,
+  ADD COLUMN IF NOT EXISTS delegacion_municipio   text,
+  ADD COLUMN IF NOT EXISTS estado_provincia       text,
+  ADD COLUMN IF NOT EXISTS estado_nacimiento      text,
+  -- Documentos personales
+  ADD COLUMN IF NOT EXISTS credencial_elector     text,
+  ADD COLUMN IF NOT EXISTS cartilla               text,
+  -- Personal
+  ADD COLUMN IF NOT EXISTS estado_civil           text,
+  ADD COLUMN IF NOT EXISTS estatura               numeric(4,2),
+  ADD COLUMN IF NOT EXISTS talla                  text,
+  -- Perfil académico
+  ADD COLUMN IF NOT EXISTS grado_estudios         text,
+  ADD COLUMN IF NOT EXISTS licenciatura_curso     text,
+  ADD COLUMN IF NOT EXISTS idiomas                text,
+  -- Emergencia + médico
+  ADD COLUMN IF NOT EXISTS contacto_emergencia    text,
+  ADD COLUMN IF NOT EXISTS datos_medicos          text,
+  ADD COLUMN IF NOT EXISTS tipo_sangre            text,
+  -- Trazabilidad
+  ADD COLUMN IF NOT EXISTS recomendado_por        text,
+  ADD COLUMN IF NOT EXISTS fecha_antiguedad       date,
+  ADD COLUMN IF NOT EXISTS status_oculto          boolean NOT NULL DEFAULT false,
+  ADD COLUMN IF NOT EXISTS requisicion_origen_id  uuid REFERENCES te_requisicion_personal(id);
+
+-- ---------------------------------------------------------------------------
+-- 2. Expandir tc_puestos
+-- ---------------------------------------------------------------------------
+ALTER TABLE tc_puestos
+  ADD COLUMN IF NOT EXISTS confirmar_entre_seriados      boolean NOT NULL DEFAULT false,
+  ADD COLUMN IF NOT EXISTS matricial                     boolean NOT NULL DEFAULT false;
+
+-- ---------------------------------------------------------------------------
+-- 3. Reglas de asistencia TimeScan (extraer del puesto)
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS tc_reglas_asistencia_timescan (
+  id                     uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  tenant_id              uuid NOT NULL REFERENCES te_tenants(id) ON DELETE CASCADE,
+  titulo                 text NOT NULL,
+  min_ant_entrada        int NOT NULL DEFAULT 15,
+  min_retardo            int NOT NULL DEFAULT 10,
+  min_ant_salida         int NOT NULL DEFAULT 15,
+  min_desp_salida        int NOT NULL DEFAULT 30,
+  activo                 boolean NOT NULL DEFAULT true,
+  creado_en timestamptz NOT NULL DEFAULT now(), creado_por uuid,
+  modificado_en timestamptz NOT NULL DEFAULT now(), modificado_por uuid,
+  UNIQUE (tenant_id, titulo)
+);
+DROP TRIGGER IF EXISTS tg_aud_rats ON tc_reglas_asistencia_timescan;
+CREATE TRIGGER tg_aud_rats BEFORE INSERT OR UPDATE ON tc_reglas_asistencia_timescan
+  FOR EACH ROW EXECUTE FUNCTION tg_auditoria();
+
+ALTER TABLE tc_puestos
+  ADD COLUMN IF NOT EXISTS id_regla_asistencia_timescan  uuid REFERENCES tc_reglas_asistencia_timescan(id);
+
+-- ---------------------------------------------------------------------------
+-- 4. Personal — tablas nuevas
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS te_lista_negra_empleados (
+  id              uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  tenant_id       uuid NOT NULL REFERENCES te_tenants(id) ON DELETE CASCADE,
+  rfc             text,
+  curp            text,
+  nombre_completo text NOT NULL,
+  motivo          text NOT NULL,
+  autorizado_por  uuid,
+  fecha_bloqueo   date NOT NULL DEFAULT CURRENT_DATE,
+  activo          boolean NOT NULL DEFAULT true,
+  observaciones   text,
+  creado_en timestamptz NOT NULL DEFAULT now(), creado_por uuid,
+  modificado_en timestamptz NOT NULL DEFAULT now(), modificado_por uuid,
+  CHECK (rfc IS NOT NULL OR curp IS NOT NULL)
+);
+CREATE INDEX IF NOT EXISTS ix_ln_rfc ON te_lista_negra_empleados(tenant_id, rfc) WHERE activo;
+CREATE INDEX IF NOT EXISTS ix_ln_curp ON te_lista_negra_empleados(tenant_id, curp) WHERE activo;
+DROP TRIGGER IF EXISTS tg_aud_ln ON te_lista_negra_empleados;
+CREATE TRIGGER tg_aud_ln BEFORE INSERT OR UPDATE ON te_lista_negra_empleados
+  FOR EACH ROW EXECUTE FUNCTION tg_auditoria();
+
+CREATE TABLE IF NOT EXISTS te_observaciones_empleado (
+  id              uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  tenant_id       uuid NOT NULL REFERENCES te_tenants(id) ON DELETE CASCADE,
+  empleado_id     uuid NOT NULL REFERENCES te_empleados(id) ON DELETE CASCADE,
+  tipo_registro   text NOT NULL,   -- 'RRHH','Operación','Nómina','Cliente'
+  observacion     text NOT NULL,
+  autor_id        uuid,
+  fecha_obs       timestamptz NOT NULL DEFAULT now(),
+  creado_en timestamptz NOT NULL DEFAULT now(), creado_por uuid,
+  modificado_en timestamptz NOT NULL DEFAULT now(), modificado_por uuid
+);
+CREATE INDEX IF NOT EXISTS ix_obs_emp ON te_observaciones_empleado(tenant_id, empleado_id, fecha_obs DESC);
+DROP TRIGGER IF EXISTS tg_aud_oe ON te_observaciones_empleado;
+CREATE TRIGGER tg_aud_oe BEFORE INSERT OR UPDATE ON te_observaciones_empleado
+  FOR EACH ROW EXECUTE FUNCTION tg_auditoria();
+
+-- ---------------------------------------------------------------------------
+-- 5. Logs (TL_*) — renombrar y agregar
+-- ---------------------------------------------------------------------------
+
+-- Log de altas/bajas
+CREATE TABLE IF NOT EXISTS tl_log_altas_bajas (
+  id              uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  tenant_id       uuid NOT NULL REFERENCES te_tenants(id) ON DELETE CASCADE,
+  empleado_id     uuid REFERENCES te_empleados(id),
+  candidato_id    uuid REFERENCES te_candidatos(id),
+  nombre_persona  text,
+  fecha           timestamptz NOT NULL DEFAULT now(),
+  de_estado       text,
+  a_estado        text NOT NULL,
+  observaciones   text,
+  actor_id        uuid,
+  actor_nombre    text,
+  CHECK (empleado_id IS NOT NULL OR candidato_id IS NOT NULL)
+);
+CREATE INDEX IF NOT EXISTS ix_lab_emp ON tl_log_altas_bajas(tenant_id, empleado_id, fecha DESC);
+DROP TRIGGER IF EXISTS tg_lab_no_mut ON tl_log_altas_bajas;
+CREATE TRIGGER tg_lab_no_mut BEFORE UPDATE OR DELETE ON tl_log_altas_bajas
+  FOR EACH ROW EXECUTE FUNCTION tg_deny_mutations();
+
+-- Log de cierre de nómina
+CREATE TABLE IF NOT EXISTS tl_log_cierre_nomina (
+  id              uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  tenant_id       uuid NOT NULL REFERENCES te_tenants(id) ON DELETE CASCADE,
+  periodo_id      uuid REFERENCES te_nominas_periodo(id),
+  paso            text NOT NULL,
+  descripcion     text,
+  ts              timestamptz NOT NULL DEFAULT now(),
+  actor_id        uuid,
+  detalles        jsonb
+);
+CREATE INDEX IF NOT EXISTS ix_lcn ON tl_log_cierre_nomina(tenant_id, periodo_id, ts DESC);
+DROP TRIGGER IF EXISTS tg_lcn_no_mut ON tl_log_cierre_nomina;
+CREATE TRIGGER tg_lcn_no_mut BEFORE UPDATE OR DELETE ON tl_log_cierre_nomina
+  FOR EACH ROW EXECUTE FUNCTION tg_deny_mutations();
+
+-- Log detalle de operación (fino)
+CREATE TABLE IF NOT EXISTS tl_detalle_operacion (
+  id              uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  tenant_id       uuid NOT NULL REFERENCES te_tenants(id) ON DELETE CASCADE,
+  entidad         text NOT NULL,     -- 'pedido','reservacion','factura','pago',...
+  entidad_id      uuid NOT NULL,
+  operacion       text NOT NULL,     -- 'INSERT','UPDATE','DELETE','CANCEL','LIBERAR',...
+  atributo        text,
+  valor_anterior  text,
+  valor_nuevo     text,
+  actor_id        uuid,
+  ts              timestamptz NOT NULL DEFAULT now(),
+  detalles        jsonb
+);
+CREATE INDEX IF NOT EXISTS ix_ldo_ent ON tl_detalle_operacion(tenant_id, entidad, entidad_id, ts DESC);
+DROP TRIGGER IF EXISTS tg_ldo_no_mut ON tl_detalle_operacion;
+CREATE TRIGGER tg_ldo_no_mut BEFORE UPDATE OR DELETE ON tl_detalle_operacion
+  FOR EACH ROW EXECUTE FUNCTION tg_deny_mutations();
+
+-- Movimientos de empleado (encabezado + detalle)
+CREATE TABLE IF NOT EXISTS tl_movimientos_empleado_encabezado (
+  id              uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  tenant_id       uuid NOT NULL REFERENCES te_tenants(id) ON DELETE CASCADE,
+  tipo_batch      text NOT NULL,   -- 'alta_masiva','baja_masiva','cambio_puesto_masivo'
+  descripcion     text,
+  cnt_registros   int NOT NULL DEFAULT 0,
+  actor_id        uuid,
+  procesado_en    timestamptz NOT NULL DEFAULT now(),
+  status          text NOT NULL DEFAULT 'procesado'
+);
+DROP TRIGGER IF EXISTS tg_lmee_no_mut ON tl_movimientos_empleado_encabezado;
+CREATE TRIGGER tg_lmee_no_mut BEFORE UPDATE OR DELETE ON tl_movimientos_empleado_encabezado
+  FOR EACH ROW EXECUTE FUNCTION tg_deny_mutations();
+
+-- Renombrar mi te_movimientos_empleado → tl_movimientos_empleado_det
+DO $$ BEGIN
+  IF EXISTS (SELECT 1 FROM information_schema.tables
+             WHERE table_schema='public' AND table_name='te_movimientos_empleado')
+     AND NOT EXISTS (SELECT 1 FROM information_schema.tables
+                     WHERE table_schema='public' AND table_name='tl_movimientos_empleado_det')
+  THEN
+    EXECUTE 'ALTER TABLE te_movimientos_empleado RENAME TO tl_movimientos_empleado_det';
+  END IF;
+END $$;
+-- Agregar FK al encabezado
+ALTER TABLE tl_movimientos_empleado_det
+  ADD COLUMN IF NOT EXISTS encabezado_id uuid REFERENCES tl_movimientos_empleado_encabezado(id);
+
+-- Renombrar te_bitacora_accesos → tl_registro_modulos + enriquecer
+DO $$ BEGIN
+  IF EXISTS (SELECT 1 FROM information_schema.tables
+             WHERE table_schema='public' AND table_name='te_bitacora_accesos')
+     AND NOT EXISTS (SELECT 1 FROM information_schema.tables
+                     WHERE table_schema='public' AND table_name='tl_registro_modulos')
+  THEN
+    EXECUTE 'ALTER TABLE te_bitacora_accesos RENAME TO tl_registro_modulos';
+  END IF;
+END $$;
+
+ALTER TABLE tl_registro_modulos
+  ADD COLUMN IF NOT EXISTS formulario     text,
+  ADD COLUMN IF NOT EXISTS atributo       text,
+  ADD COLUMN IF NOT EXISTS valor_anterior text,
+  ADD COLUMN IF NOT EXISTS valor_nuevo    text;
+
+-- Actualizar log_bitacora para escribir en tl_registro_modulos
+CREATE OR REPLACE FUNCTION log_bitacora(p_modulo text, p_accion text, p_detalle text DEFAULT NULL)
+RETURNS uuid AS $$
+DECLARE nid uuid; t uuid;
+BEGIN
+  t := current_tenant_id();
+  IF t IS NULL THEN
+    RAISE EXCEPTION 'sin tenant activo — el header x-tenant-id no vino en la request';
+  END IF;
+  INSERT INTO tl_registro_modulos (tenant_id, actor_id, modulo, accion, detalle)
+  VALUES (t, current_user_id(), p_modulo, p_accion, p_detalle)
+  RETURNING id INTO nid;
+  RETURN nid;
+END $$ LANGUAGE plpgsql SECURITY DEFINER;
+GRANT EXECUTE ON FUNCTION log_bitacora(text, text, text) TO anon, authenticated;
+
+-- ---------------------------------------------------------------------------
+-- 6. Catálogos geo (ciudades, códigos postales, colonias)
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS tc_ciudades (
+  id            uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  tenant_id     uuid NOT NULL REFERENCES te_tenants(id) ON DELETE CASCADE,
+  estado_id     uuid REFERENCES tc_estados_mx(id),
+  nombre        text NOT NULL,
+  activo        boolean NOT NULL DEFAULT true,
+  creado_en timestamptz NOT NULL DEFAULT now(), creado_por uuid,
+  modificado_en timestamptz NOT NULL DEFAULT now(), modificado_por uuid,
+  UNIQUE (tenant_id, estado_id, nombre)
+);
+DROP TRIGGER IF EXISTS tg_aud_ciu ON tc_ciudades;
+CREATE TRIGGER tg_aud_ciu BEFORE INSERT OR UPDATE ON tc_ciudades
+  FOR EACH ROW EXECUTE FUNCTION tg_auditoria();
+
+CREATE TABLE IF NOT EXISTS tc_codigos_postales (
+  id            uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  tenant_id     uuid NOT NULL REFERENCES te_tenants(id) ON DELETE CASCADE,
+  cp            text NOT NULL,
+  ciudad_id     uuid REFERENCES tc_ciudades(id),
+  estado_id     uuid REFERENCES tc_estados_mx(id),
+  municipio     text,
+  activo        boolean NOT NULL DEFAULT true,
+  creado_en timestamptz NOT NULL DEFAULT now(), creado_por uuid,
+  modificado_en timestamptz NOT NULL DEFAULT now(), modificado_por uuid,
+  UNIQUE (tenant_id, cp)
+);
+DROP TRIGGER IF EXISTS tg_aud_cp ON tc_codigos_postales;
+CREATE TRIGGER tg_aud_cp BEFORE INSERT OR UPDATE ON tc_codigos_postales
+  FOR EACH ROW EXECUTE FUNCTION tg_auditoria();
+
+CREATE TABLE IF NOT EXISTS tc_colonias_cp (
+  id            uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  tenant_id     uuid NOT NULL REFERENCES te_tenants(id) ON DELETE CASCADE,
+  cp_id         uuid NOT NULL REFERENCES tc_codigos_postales(id) ON DELETE CASCADE,
+  nombre        text NOT NULL,
+  tipo          text,
+  creado_en timestamptz NOT NULL DEFAULT now(), creado_por uuid,
+  modificado_en timestamptz NOT NULL DEFAULT now(), modificado_por uuid,
+  UNIQUE (tenant_id, cp_id, nombre)
+);
+DROP TRIGGER IF EXISTS tg_aud_col ON tc_colonias_cp;
+CREATE TRIGGER tg_aud_col BEFORE INSERT OR UPDATE ON tc_colonias_cp
+  FOR EACH ROW EXECUTE FUNCTION tg_auditoria();
+
+-- ---------------------------------------------------------------------------
+-- 7. Catálogos menores
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS tc_como_se_entero (
+  id            uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  tenant_id     uuid NOT NULL REFERENCES te_tenants(id) ON DELETE CASCADE,
+  clave         text NOT NULL,
+  titulo        text NOT NULL,
+  activo        boolean NOT NULL DEFAULT true,
+  creado_en timestamptz NOT NULL DEFAULT now(), creado_por uuid,
+  modificado_en timestamptz NOT NULL DEFAULT now(), modificado_por uuid,
+  UNIQUE (tenant_id, clave)
+);
+DROP TRIGGER IF EXISTS tg_aud_cse ON tc_como_se_entero;
+CREATE TRIGGER tg_aud_cse BEFORE INSERT OR UPDATE ON tc_como_se_entero
+  FOR EACH ROW EXECUTE FUNCTION tg_auditoria();
+
+CREATE TABLE IF NOT EXISTS tc_causas_baja_reingreso (
+  id            uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  tenant_id     uuid NOT NULL REFERENCES te_tenants(id) ON DELETE CASCADE,
+  clave         text NOT NULL,
+  titulo        text NOT NULL,
+  tipo          text NOT NULL,     -- 'baja' | 'reingreso'
+  descripcion   text,
+  activo        boolean NOT NULL DEFAULT true,
+  creado_en timestamptz NOT NULL DEFAULT now(), creado_por uuid,
+  modificado_en timestamptz NOT NULL DEFAULT now(), modificado_por uuid,
+  UNIQUE (tenant_id, clave)
+);
+DROP TRIGGER IF EXISTS tg_aud_cbr ON tc_causas_baja_reingreso;
+CREATE TRIGGER tg_aud_cbr BEFORE INSERT OR UPDATE ON tc_causas_baja_reingreso
+  FOR EACH ROW EXECUTE FUNCTION tg_auditoria();
+
+CREATE TABLE IF NOT EXISTS tc_presentaciones_producto (
+  id            uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  tenant_id     uuid NOT NULL REFERENCES te_tenants(id) ON DELETE CASCADE,
+  clave         text NOT NULL,
+  titulo        text NOT NULL,
+  descripcion   text,
+  activo        boolean NOT NULL DEFAULT true,
+  creado_en timestamptz NOT NULL DEFAULT now(), creado_por uuid,
+  modificado_en timestamptz NOT NULL DEFAULT now(), modificado_por uuid,
+  UNIQUE (tenant_id, clave)
+);
+DROP TRIGGER IF EXISTS tg_aud_pp ON tc_presentaciones_producto;
+CREATE TRIGGER tg_aud_pp BEFORE INSERT OR UPDATE ON tc_presentaciones_producto
+  FOR EACH ROW EXECUTE FUNCTION tg_auditoria();
+
+-- ---------------------------------------------------------------------------
+-- 8. Relaciones N:N (tr_*)
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS tr_credencial_puesto (
+  id            uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  tenant_id     uuid NOT NULL REFERENCES te_tenants(id) ON DELETE CASCADE,
+  puesto_id     uuid NOT NULL REFERENCES tc_puestos(id) ON DELETE CASCADE,
+  credencial    text NOT NULL,
+  obligatoria   boolean NOT NULL DEFAULT true,
+  creado_en timestamptz NOT NULL DEFAULT now(), creado_por uuid,
+  modificado_en timestamptz NOT NULL DEFAULT now(), modificado_por uuid,
+  UNIQUE (tenant_id, puesto_id, credencial)
+);
+DROP TRIGGER IF EXISTS tg_aud_trcp ON tr_credencial_puesto;
+CREATE TRIGGER tg_aud_trcp BEFORE INSERT OR UPDATE ON tr_credencial_puesto
+  FOR EACH ROW EXECUTE FUNCTION tg_auditoria();
+
+CREATE TABLE IF NOT EXISTS tr_productos_similares (
+  id                  uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  tenant_id           uuid NOT NULL REFERENCES te_tenants(id) ON DELETE CASCADE,
+  producto_id         uuid NOT NULL REFERENCES tc_productos(id) ON DELETE CASCADE,
+  producto_similar_id uuid NOT NULL REFERENCES tc_productos(id),
+  bidireccional       boolean NOT NULL DEFAULT true,
+  creado_en timestamptz NOT NULL DEFAULT now(), creado_por uuid,
+  modificado_en timestamptz NOT NULL DEFAULT now(), modificado_por uuid,
+  UNIQUE (tenant_id, producto_id, producto_similar_id),
+  CHECK (producto_id <> producto_similar_id)
+);
+DROP TRIGGER IF EXISTS tg_aud_trps ON tr_productos_similares;
+CREATE TRIGGER tg_aud_trps BEFORE INSERT OR UPDATE ON tr_productos_similares
+  FOR EACH ROW EXECUTE FUNCTION tg_auditoria();
+
+CREATE TABLE IF NOT EXISTS tr_puestos_similares (
+  id                uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  tenant_id         uuid NOT NULL REFERENCES te_tenants(id) ON DELETE CASCADE,
+  puesto_id         uuid NOT NULL REFERENCES tc_puestos(id) ON DELETE CASCADE,
+  puesto_similar_id uuid NOT NULL REFERENCES tc_puestos(id),
+  bidireccional     boolean NOT NULL DEFAULT true,
+  creado_en timestamptz NOT NULL DEFAULT now(), creado_por uuid,
+  modificado_en timestamptz NOT NULL DEFAULT now(), modificado_por uuid,
+  UNIQUE (tenant_id, puesto_id, puesto_similar_id),
+  CHECK (puesto_id <> puesto_similar_id)
+);
+DROP TRIGGER IF EXISTS tg_aud_trps2 ON tr_puestos_similares;
+CREATE TRIGGER tg_aud_trps2 BEFORE INSERT OR UPDATE ON tr_puestos_similares
+  FOR EACH ROW EXECUTE FUNCTION tg_auditoria();
+
+CREATE TABLE IF NOT EXISTS tr_producto_puesto (
+  id            uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  tenant_id     uuid NOT NULL REFERENCES te_tenants(id) ON DELETE CASCADE,
+  producto_id   uuid NOT NULL REFERENCES tc_productos(id) ON DELETE CASCADE,
+  puesto_id     uuid NOT NULL REFERENCES tc_puestos(id),
+  es_principal  boolean NOT NULL DEFAULT false,
+  creado_en timestamptz NOT NULL DEFAULT now(), creado_por uuid,
+  modificado_en timestamptz NOT NULL DEFAULT now(), modificado_por uuid,
+  UNIQUE (tenant_id, producto_id, puesto_id)
+);
+DROP TRIGGER IF EXISTS tg_aud_trpp ON tr_producto_puesto;
+CREATE TRIGGER tg_aud_trpp BEFORE INSERT OR UPDATE ON tr_producto_puesto
+  FOR EACH ROW EXECUTE FUNCTION tg_auditoria();
+
+-- ---------------------------------------------------------------------------
+-- 9. Máquina de estados del cierre de nómina
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS te_proceso_cierre_nomina (
+  id                                    uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  tenant_id                             uuid NOT NULL REFERENCES te_tenants(id) ON DELETE CASCADE,
+  periodo_id                            uuid NOT NULL REFERENCES te_nominas_periodo(id) ON DELETE CASCADE,
+  paso_actual                           text NOT NULL DEFAULT 'inicial',
+  ejecuta_precauciones_previas          boolean NOT NULL DEFAULT false,
+  precauciones_previas_terminadas       boolean NOT NULL DEFAULT false,
+  ejecuta_cierre_nomina                 boolean NOT NULL DEFAULT false,
+  cierre_completo                       boolean NOT NULL DEFAULT false,
+  observaciones                         text,
+  creado_en timestamptz NOT NULL DEFAULT now(), creado_por uuid,
+  modificado_en timestamptz NOT NULL DEFAULT now(), modificado_por uuid
+);
+DROP TRIGGER IF EXISTS tg_aud_pcn ON te_proceso_cierre_nomina;
+CREATE TRIGGER tg_aud_pcn BEFORE INSERT OR UPDATE ON te_proceso_cierre_nomina
+  FOR EACH ROW EXECUTE FUNCTION tg_auditoria();
+
+-- ---------------------------------------------------------------------------
+-- 10. Cola de listas manuales pendientes
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS te_procesar_lista_manual (
+  id                    uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  tenant_id             uuid NOT NULL REFERENCES te_tenants(id) ON DELETE CASCADE,
+  titulo                text NOT NULL,
+  pedido_detalle_id     uuid REFERENCES te_pedidos_detalle(id),
+  archivo_pdf_url       text,
+  observaciones         text,
+  status                text NOT NULL DEFAULT 'pendiente',    -- pendiente | procesando | procesado | error
+  procesado_en          timestamptz,
+  creado_en timestamptz NOT NULL DEFAULT now(), creado_por uuid,
+  modificado_en timestamptz NOT NULL DEFAULT now(), modificado_por uuid
+);
+DROP TRIGGER IF EXISTS tg_aud_plm ON te_procesar_lista_manual;
+CREATE TRIGGER tg_aud_plm BEFORE INSERT OR UPDATE ON te_procesar_lista_manual
+  FOR EACH ROW EXECUTE FUNCTION tg_auditoria();
+
+-- ---------------------------------------------------------------------------
+-- 11. RLS + GRANTS para las nuevas
+-- ---------------------------------------------------------------------------
+DO $$
+DECLARE t text;
+BEGIN
+  FOREACH t IN ARRAY ARRAY[
+    'tc_reglas_asistencia_timescan','te_lista_negra_empleados','te_observaciones_empleado',
+    'tl_log_altas_bajas','tl_log_cierre_nomina','tl_detalle_operacion',
+    'tl_movimientos_empleado_encabezado',
+    'tc_ciudades','tc_codigos_postales','tc_colonias_cp',
+    'tc_como_se_entero','tc_causas_baja_reingreso','tc_presentaciones_producto',
+    'tr_credencial_puesto','tr_productos_similares','tr_puestos_similares','tr_producto_puesto',
+    'te_proceso_cierre_nomina','te_procesar_lista_manual'
+  ] LOOP
+    EXECUTE format('ALTER TABLE %I ENABLE ROW LEVEL SECURITY', t);
+    EXECUTE format('DROP POLICY IF EXISTS p_%1$s_sel ON %1$s', t);
+    EXECUTE format('DROP POLICY IF EXISTS p_%1$s_ins ON %1$s', t);
+    EXECUTE format('DROP POLICY IF EXISTS p_%1$s_upd ON %1$s', t);
+    EXECUTE format('DROP POLICY IF EXISTS p_%1$s_del ON %1$s', t);
+    EXECUTE format('CREATE POLICY p_%1$s_sel ON %1$s FOR SELECT USING (tenant_id = current_tenant_id());
+                     CREATE POLICY p_%1$s_ins ON %1$s FOR INSERT WITH CHECK (tenant_id = current_tenant_id());
+                     CREATE POLICY p_%1$s_upd ON %1$s FOR UPDATE USING (tenant_id = current_tenant_id());
+                     CREATE POLICY p_%1$s_del ON %1$s FOR DELETE USING (tenant_id = current_tenant_id());', t);
+  END LOOP;
+END $$;
+
+GRANT ALL ON tc_reglas_asistencia_timescan, te_lista_negra_empleados, te_observaciones_empleado,
+             tl_log_altas_bajas, tl_log_cierre_nomina, tl_detalle_operacion,
+             tl_movimientos_empleado_encabezado,
+             tc_ciudades, tc_codigos_postales, tc_colonias_cp,
+             tc_como_se_entero, tc_causas_baja_reingreso, tc_presentaciones_producto,
+             tr_credencial_puesto, tr_productos_similares, tr_puestos_similares, tr_producto_puesto,
+             te_proceso_cierre_nomina, te_procesar_lista_manual
+  TO anon, authenticated, service_role;
+
+-- ---------------------------------------------------------------------------
+-- 12. Semillas
+-- ---------------------------------------------------------------------------
+SET LOCAL app.current_tenant = '00000000-0000-0000-0000-000000000001';
+
+-- Regla asistencia default
+INSERT INTO tc_reglas_asistencia_timescan (tenant_id, titulo, min_ant_entrada, min_retardo, min_ant_salida, min_desp_salida) VALUES
+  ('00000000-0000-0000-0000-000000000001', 'Regla estándar (15/10/15/30)', 15, 10, 15, 30),
+  ('00000000-0000-0000-0000-000000000001', 'Estricta (5/5/5/15)', 5, 5, 5, 15),
+  ('00000000-0000-0000-0000-000000000001', 'Flexible (30/20/30/60)', 30, 20, 30, 60)
+ON CONFLICT DO NOTHING;
+
+-- Cómo se enteró
+INSERT INTO tc_como_se_entero (tenant_id, clave, titulo) VALUES
+  ('00000000-0000-0000-0000-000000000001', 'referido',    'Referido por empleado'),
+  ('00000000-0000-0000-0000-000000000001', 'redes',       'Redes sociales'),
+  ('00000000-0000-0000-0000-000000000001', 'bolsa',       'Bolsa de trabajo online'),
+  ('00000000-0000-0000-0000-000000000001', 'volante',     'Volante impreso'),
+  ('00000000-0000-0000-0000-000000000001', 'evento',      'Evento presencial'),
+  ('00000000-0000-0000-0000-000000000001', 'otro',        'Otro')
+ON CONFLICT DO NOTHING;
+
+-- Causas de baja/reingreso
+INSERT INTO tc_causas_baja_reingreso (tenant_id, clave, titulo, tipo) VALUES
+  ('00000000-0000-0000-0000-000000000001', 'baja_voluntaria',   'Baja voluntaria del empleado',        'baja'),
+  ('00000000-0000-0000-0000-000000000001', 'baja_faltas',       'Baja por faltas injustificadas',       'baja'),
+  ('00000000-0000-0000-0000-000000000001', 'baja_bajo_desemp',  'Baja por bajo desempeño',              'baja'),
+  ('00000000-0000-0000-0000-000000000001', 'baja_conducta',     'Baja por conducta inapropiada',        'baja'),
+  ('00000000-0000-0000-0000-000000000001', 'baja_medica',       'Baja por incapacidad médica',          'baja'),
+  ('00000000-0000-0000-0000-000000000001', 'reingreso_est',     'Reingreso estándar',                   'reingreso'),
+  ('00000000-0000-0000-0000-000000000001', 'reingreso_temp',    'Reingreso temporal (por evento)',      'reingreso')
+ON CONFLICT DO NOTHING;
+
+-- Estados MX básicos
+INSERT INTO tc_estados_mx (tenant_id, clave_ine, nombre) VALUES
+  ('00000000-0000-0000-0000-000000000001', 'CMX', 'Ciudad de México'),
+  ('00000000-0000-0000-0000-000000000001', 'MEX', 'Estado de México'),
+  ('00000000-0000-0000-0000-000000000001', 'JAL', 'Jalisco'),
+  ('00000000-0000-0000-0000-000000000001', 'NLE', 'Nuevo León'),
+  ('00000000-0000-0000-0000-000000000001', 'PUE', 'Puebla'),
+  ('00000000-0000-0000-0000-000000000001', 'QRO', 'Querétaro')
+ON CONFLICT DO NOTHING;

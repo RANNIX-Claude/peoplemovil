@@ -8,4 +8,14 @@ dist/
 .vscode/
 *.xpz
 *.zip
+*.accdb
+*.mdb
+*.m4a
 PeopleMovil_2.0_Documentacion_Completa/
+genexus/
+freelance/
+AppSCPF*.xml
+*.pptx
+*.mp4
+documentacion-referencia/Manual Técnico/
+documentacion-referencia/Manual Usuario/

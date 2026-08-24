@@ -14,7 +14,7 @@ export default function Bitacora() {
 
   useEffect(() => {
     if (!supabaseReady) return;
-    supabase.from('te_bitacora_accesos').select('*').order('ts_servidor', { ascending: false }).limit(300)
+    supabase.from('tl_registro_modulos').select('*').order('ts_servidor', { ascending: false }).limit(300)
       .then(({ data }) => setRows(data || []));
   }, []);
 
