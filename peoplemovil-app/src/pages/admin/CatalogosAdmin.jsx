@@ -5,6 +5,7 @@ import Modal from '../../components/ui/Modal.jsx';
 import Chip from '../../components/ui/Chip.jsx';
 import Badge from '../../components/ui/Badge.jsx';
 import { useModuleAudit, logAccion } from '../../lib/audit.js';
+import { useAdminAuth } from '../../lib/AdminAuthContext.jsx';
 
 // HU 9.01 — Administración de Catálogos
 // Un solo módulo con selector de catálogo + toolbar (Agregar/Eliminar/Buscar/Exportar) + tabla editable
@@ -38,6 +39,8 @@ const CATALOGOS = [
 
 export default function CatalogosAdmin() {
   useModuleAudit('catalogos_admin');
+  const { hasPermiso } = useAdminAuth();
+  const puedeEditar = hasPermiso('catalogos.editar');
   const [catActiva, setCatActiva] = useState(CATALOGOS[0]);
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -120,12 +123,13 @@ export default function CatalogosAdmin() {
             <input className="field" placeholder="Buscar en todos los campos…" value={busqueda} onChange={e => setBusqueda(e.target.value)} />
           </div>
           <div style={{ display: 'flex', gap: 6, alignItems: 'end' }}>
-            <button className="btn" onClick={() => setNuevoOpen(true)}>+ Agregar</button>
+            {puedeEditar && <button className="btn" onClick={() => setNuevoOpen(true)}>+ Agregar</button>}
             <button className="btn outline sm" onClick={exportarCSV}>📥 CSV</button>
           </div>
         </div>
         <div style={{ marginTop: 8, fontSize: 12, color: 'var(--muted)' }}>
           <strong>{filtradas.length}</strong> de {rows.length} registros {loading && '· cargando…'}
+          {!puedeEditar && <span> · solo lectura (tu rol no tiene <code>catalogos.editar</code>)</span>}
         </div>
       </div>
 
@@ -144,7 +148,7 @@ export default function CatalogosAdmin() {
               <tr key={r.id}>
                 {catActiva.cols.map(c => <td key={c}>{fmt(r[c])}</td>)}
                 <td style={{ textAlign: 'right' }}>
-                  <button className="btn ghost sm" onClick={() => eliminar(r)}>🗑</button>
+                  {puedeEditar && <button className="btn ghost sm" onClick={() => eliminar(r)}>🗑</button>}
                 </td>
               </tr>
             ))}

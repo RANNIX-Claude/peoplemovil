@@ -4361,3 +4361,905 @@ $$ LANGUAGE sql STABLE;
 
 COMMENT ON FUNCTION matriz_puestos_pedido IS
   'Formato largo (una fila por fecha/detalle) para que el frontend arme la Matriz de Puestos como tabla pivote (fechas como columnas, Bloque+Producto como filas) -- equivalente funcional a TE_Puente del sistema legado, sin su límite fijo de 50 columnas.';
+
+-- ============================================================================
+-- Migración 010 — tc_eventos (proyecto) + te_requisicion_personal_detalle
+-- ============================================================================
+-- Fuente: XPZ real de GeneXus (export del KB, más completo que el SQL Server
+-- en vivo -- esa instancia nunca se desplegó con el esquema final).
+--
+-- TE_Evento (XPZ): TE_EventoID, TE_EventoDes, TE_EventoFecIni, TE_EventoHora,
+-- TE_EventoMinutos, TE_EventoIMG, TE_EventoFeinicial, TE_EventoFeTer,
+-- TE_EventoFechaVigencia, TC_InmuebleID/Des. Confirma que el Evento real SÍ
+-- tiene rango de fechas (inicio/fin) -- coincide con la explicación del
+-- usuario de que un "Evento" (ej. Fórmula 1) es en realidad un PROYECTO que
+-- puede durar 2-3 meses, del cual cuelgan varios Pedidos por etapa/fase.
+--
+-- TC_Inmueble (XPZ): catálogo usado por TE_Evento, TC_EstacionNACS (estación
+-- biométrica) y TE_RegistroBiometrico -- es el mismo concepto que ya
+-- modelamos como tc_sitios (el inmueble físico donde ocurre el trabajo y
+-- donde viven las estaciones de checado). NO se crea una tabla nueva --
+-- tc_eventos.sitio_id referencia tc_sitios directamente.
+--
+-- Nota verificada y descartada: la frase "el sector, la Entidad Federativa,
+-- el promotor" del manual "Funcionalidad desarrollada 2.01.docx" es texto de
+-- intención/planeación -- no existe como columna real en TE_Pedido, TE_Evento
+-- ni dbo_Pedidos. No se agrega al esquema.
+--
+-- TE_ReqPer (XPZ, Requisición de personal -- NO existe en el SQL Server en
+-- vivo ni en el Access, solo en el XPZ -- confirma que este módulo se diseñó
+-- pero la instancia que tenemos nunca llegó a tener esta tabla desplegada):
+-- cada fila real de TE_ReqPer YA es una línea por puesto (TC_PuestosId +
+-- TE_ReqPerCantElem), con un perfil detallado por línea (edad, sexo,
+-- escolaridad, idiomas, viajar, licencia, experiencia, conocimientos
+-- técnicos, objetivo y actividades del puesto). Aquí se modela como tabla de
+-- detalle separada (te_requisicion_personal_detalle), consistente con el
+-- patrón ya usado en te_pedidos/te_pedidos_detalle, en vez de replicar el
+-- renglón plano de GeneXus -- decisión de normalización, no de omisión: TODOS
+-- los campos reales de TE_ReqPer quedan representados.
+-- ============================================================================
+
+-- ---------------------------------------------------------------------------
+-- 1. tc_eventos: rango de fechas real + inmueble (confirmado por TE_Evento)
+-- ---------------------------------------------------------------------------
+ALTER TABLE tc_eventos
+  ADD COLUMN IF NOT EXISTS descripcion     text,
+  ADD COLUMN IF NOT EXISTS fecha_inicio    date,
+  ADD COLUMN IF NOT EXISTS fecha_fin       date,
+  ADD COLUMN IF NOT EXISTS hora_inicio     time,
+  ADD COLUMN IF NOT EXISTS sitio_id        uuid REFERENCES tc_sitios(id),
+  ADD COLUMN IF NOT EXISTS imagen_url      text;
+
+-- ---------------------------------------------------------------------------
+-- 2. te_requisicion_personal_detalle: una línea por Puesto solicitado, con
+--    el perfil completo real de TE_ReqPer
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS te_requisicion_personal_detalle (
+  id                        uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  tenant_id                 uuid NOT NULL REFERENCES te_tenants(id) ON DELETE CASCADE,
+  requisicion_id            uuid NOT NULL REFERENCES te_requisicion_personal(id) ON DELETE CASCADE,
+  puesto_id                 uuid REFERENCES tc_puestos(id),
+  cantidad                  int NOT NULL DEFAULT 1,
+  -- Perfil solicitado (TE_ReqPerDesPuesto* en el real)
+  requiere_descripcion_perfil boolean NOT NULL DEFAULT false,
+  edad_requerida             text,
+  sexo_requerido              sexo_enum,
+  escolaridad_requerida       text,
+  idiomas_requeridos          text,
+  requiere_viajar             boolean,
+  requiere_licencia_conducir  boolean,
+  requiere_experiencia        boolean,
+  conocimientos_tecnicos      text,
+  objetivo_puesto             text,
+  actividades_puesto          text,
+  creado_en timestamptz NOT NULL DEFAULT now(), creado_por uuid,
+  modificado_en timestamptz NOT NULL DEFAULT now(), modificado_por uuid
+);
+DROP TRIGGER IF EXISTS tg_aud_reqperdet ON te_requisicion_personal_detalle;
+CREATE TRIGGER tg_aud_reqperdet BEFORE INSERT OR UPDATE ON te_requisicion_personal_detalle
+  FOR EACH ROW EXECUTE FUNCTION tg_auditoria();
+
+-- Área/depto/jefe inmediato solicitante -- confirmados en TE_ReqPer
+-- (TE_ReqPerArea, TE_ReqPerDepto, TE_ReqPerNomjefeInm) y no estaban en
+-- te_requisicion_personal
+ALTER TABLE te_requisicion_personal
+  ADD COLUMN IF NOT EXISTS area              text,
+  ADD COLUMN IF NOT EXISTS departamento      text,
+  ADD COLUMN IF NOT EXISTS jefe_inmediato    text,
+  ADD COLUMN IF NOT EXISTS unidad_negocio_id uuid REFERENCES tc_unidades_negocio(id),
+  ADD COLUMN IF NOT EXISTS responsable_id    uuid REFERENCES tc_responsables(id);
+
+-- ---------------------------------------------------------------------------
+-- 3. RLS + GRANTS
+-- ---------------------------------------------------------------------------
+DO $$
+DECLARE t text;
+BEGIN
+  FOREACH t IN ARRAY ARRAY['te_requisicion_personal_detalle'] LOOP
+    EXECUTE format('ALTER TABLE %I ENABLE ROW LEVEL SECURITY', t);
+    EXECUTE format('DROP POLICY IF EXISTS p_%1$s_sel ON %1$s', t);
+    EXECUTE format('DROP POLICY IF EXISTS p_%1$s_ins ON %1$s', t);
+    EXECUTE format('DROP POLICY IF EXISTS p_%1$s_upd ON %1$s', t);
+    EXECUTE format('DROP POLICY IF EXISTS p_%1$s_del ON %1$s', t);
+    EXECUTE format('CREATE POLICY p_%1$s_sel ON %1$s FOR SELECT USING (tenant_id = current_tenant_id());
+                     CREATE POLICY p_%1$s_ins ON %1$s FOR INSERT WITH CHECK (tenant_id = current_tenant_id());
+                     CREATE POLICY p_%1$s_upd ON %1$s FOR UPDATE USING (tenant_id = current_tenant_id());
+                     CREATE POLICY p_%1$s_del ON %1$s FOR DELETE USING (tenant_id = current_tenant_id());', t);
+  END LOOP;
+END $$;
+
+GRANT ALL ON te_requisicion_personal_detalle TO anon, authenticated, service_role;
+
+-- ============================================================================
+
+-- ============================================================================
+-- Migración 011 — Corrección tc_fases_evento (confirmado intencional por el usuario)
+-- ============================================================================
+-- El dropdown real "Fase del Evento" en el sistema 2017 (antecesor, apoyo.rh.ocesa.mx)
+-- tenía 8 valores (incluyendo desglose Fase 1-4 por día de show). El sistema 2018
+-- (GeneXus, el que se construyó) lo simplificó A PROPÓSITO a 5 valores -- confirmado
+-- explícitamente por el usuario (autor original de ambos sistemas), no es un gap a
+-- corregir sino el diseño correcto a replicar tal cual en PeopleMovil.
+--
+-- tc_fases_evento tenía solo 3 filas (Montaje/Evento en vivo/Desmontaje) usando el
+-- enum legado fase_evento_enum (montaje,evento,desmontaje,otro). Se completa a los 5
+-- valores reales confirmados: No aplica, Preparación, Montaje, Show, Desmontaje.
+-- ============================================================================
+
+ALTER TYPE fase_evento_enum ADD VALUE IF NOT EXISTS 'no_aplica';
+ALTER TYPE fase_evento_enum ADD VALUE IF NOT EXISTS 'preparacion';
+ALTER TYPE fase_evento_enum ADD VALUE IF NOT EXISTS 'show';
+
+SET LOCAL app.current_tenant = '00000000-0000-0000-0000-000000000001';
+
+-- Reordenar/renombrar las 3 filas existentes y agregar las 2 que faltaban
+UPDATE tc_fases_evento SET clave = 'montaje', titulo = 'Montaje', orden = 2
+  WHERE clave = 'montaje';
+UPDATE tc_fases_evento SET clave = 'show', titulo = 'Show', orden = 3
+  WHERE clave = 'evento';
+UPDATE tc_fases_evento SET clave = 'desmontaje', titulo = 'Desmontaje', orden = 4
+  WHERE clave = 'desmontaje';
+
+INSERT INTO tc_fases_evento (tenant_id, clave, titulo, orden) VALUES
+  ('00000000-0000-0000-0000-000000000001', 'no_aplica', 'No aplica', 0),
+  ('00000000-0000-0000-0000-000000000001', 'preparacion', 'Preparación', 1)
+ON CONFLICT DO NOTHING;
+
+-- ============================================================================
+
+-- ============================================================================
+-- Migración 012 — Portal freelance (bolsa de freelance + reservación)
+-- ============================================================================
+-- Contexto: SitiosAsignacion.jsx (admin) ya cubre Pedido+Detalle+Matriz. El lado
+-- freelance (pages/freelance/Publicaciones.jsx, MisEventos.jsx) YA EXISTÍA en el
+-- código de una fase anterior, igual que inscribirme_a_publicacion() y las vistas
+-- v_publicaciones_para_freelance / v_agenda_freelance -- pero con brechas reales:
+--
+-- 1. BUG DE PRIVACIDAD CONFIRMADO: ninguna de las 2 vistas filtraba por el
+--    empleado que hace la consulta -- solo por tenant_id (RLS de
+--    te_reservaciones/tr_empleado_plaza también es solo por tenant). Cualquier
+--    freelance autenticado podía ver la agenda y las oportunidades calculadas
+--    para CUALQUIER OTRO empleado del tenant, no solo las propias.
+-- 2. Elegibilidad real confirmada en capturas (RADIOGRAFIA_FUNCIONAL_PANTALLAS.md
+--    sección 2, "Elegibilidad para ver el pedido en el portal freelance"):
+--    Puesto + Certeza + Vigencia de plaza + no Lista Negra (por sitio) + Sucursal
+--    empleado = Sucursal pedido. La vista ya filtraba puesto+vigencia(activo), le
+--    faltaban certeza, lista negra y sucursal.
+-- 3. `tr_empleado_plaza` solo tenía `porcentaje_puntualidad` (métrica de
+--    asistencia histórica) -- le faltaba `certeza` (score de confiabilidad de
+--    confirmación, 0.00-1.00, distinto concepto, confirmado en capturas y ya
+--    usado en `tc_puestos.porcentaje_certeza_inicial/porcentaje_minimo`).
+-- 4. `te_lista_negra_empleados` ya estaba señalada como gap en el análisis de
+--    brechas (prioridad Alta, nunca resuelta): hoy es global, el real es por
+--    sitio (+ "Todos") y con fecha de expiración ("Hasta").
+-- 5. `te_empleados` no tenía `sucursal_id` -- necesario para la regla confirmada
+--    en Escenario 10 (un freelance de Querétaro no veía pedidos de CDMX).
+-- ============================================================================
+
+-- ---------------------------------------------------------------------------
+-- 1. Columnas nuevas
+-- ---------------------------------------------------------------------------
+ALTER TABLE te_empleados
+  ADD COLUMN IF NOT EXISTS sucursal_id uuid REFERENCES tc_sucursales(id);
+
+ALTER TABLE tr_empleado_plaza
+  ADD COLUMN IF NOT EXISTS certeza numeric(5,3) NOT NULL DEFAULT 1.000;
+
+ALTER TABLE te_lista_negra_empleados
+  ADD COLUMN IF NOT EXISTS sitio_id uuid REFERENCES tc_sitios(id),
+  ADD COLUMN IF NOT EXISTS fecha_expiracion date;
+
+COMMENT ON COLUMN te_lista_negra_empleados.sitio_id IS
+  'NULL = vetado en todos los sitios. Con valor = vetado solo para ese sitio (confirmado en capturas: checkbox "Todos" vs sitio específico).';
+COMMENT ON COLUMN tr_empleado_plaza.certeza IS
+  'Score de confiabilidad de confirmación (0.000-1.000), distinto de porcentaje_puntualidad (asistencia histórica). Se compara contra tc_puestos.porcentaje_minimo para elegibilidad en el portal freelance.';
+
+-- ---------------------------------------------------------------------------
+-- 2. v_publicaciones_para_freelance -- agrega empleado_id=mi_empleado_id(),
+--    certeza >= porcentaje_minimo del puesto, exclusión de lista negra por
+--    sitio+vigencia, y match de sucursal (solo si ambos lados la tienen
+--    capturada, para no ocultar todo mientras el dato no esté sembrado)
+-- ---------------------------------------------------------------------------
+CREATE OR REPLACE VIEW v_publicaciones_para_freelance AS
+SELECT
+  pd.id AS pedido_detalle_id,
+  p.id AS pedido_id,
+  p.folio,
+  p.titulo,
+  p.sitio_id,
+  s.titulo AS sitio,
+  cl.razon_social AS cliente,
+  pd.puesto_id,
+  pu.titulo AS puesto,
+  pd.turno_id,
+  t.titulo AS turno,
+  t.hora_inicio AS turno_hora_inicio,
+  t.hora_fin AS turno_hora_fin,
+  pf.fecha,
+  pf.hora_inicio,
+  pf.hora_fin,
+  fe.titulo AS fase,
+  pd.costo_unit,
+  pd.cantidad AS cupo_total,
+  (SELECT count(*) FROM te_reservaciones r
+     WHERE r.pedido_detalle_id = pd.id AND r.estado <> 'cancelado'::estado_reservacion_enum) AS cupo_ocupado,
+  pd.cierra_en,
+  pd.publicado_en,
+  ep.empleado_id,
+  ep.porcentaje_puntualidad,
+  ep.certeza
+FROM te_pedidos_detalle pd
+JOIN te_pedidos p ON p.id = pd.pedido_id
+LEFT JOIN te_pedido_fechas pf ON pf.id = pd.pedido_fecha_id
+LEFT JOIN tc_sitios s ON s.id = p.sitio_id
+LEFT JOIN tc_clientes cl ON cl.id = p.cliente_id
+LEFT JOIN tc_puestos pu ON pu.id = pd.puesto_id
+LEFT JOIN tc_turnos t ON t.id = pd.turno_id
+LEFT JOIN tc_fases_evento fe ON fe.id = pf.fase_evento_id
+JOIN tr_empleado_plaza ep ON ep.puesto_id = pd.puesto_id AND ep.activo
+JOIN te_empleados emp ON emp.id = ep.empleado_id
+WHERE pd.publicado = true
+  AND ep.empleado_id = mi_empleado_id()
+  AND (pf.fecha IS NULL OR pf.fecha >= CURRENT_DATE)
+  AND (pd.cierra_en IS NULL OR pd.cierra_en > now())
+  AND (SELECT count(*) FROM te_reservaciones r
+         WHERE r.pedido_detalle_id = pd.id AND r.estado <> 'cancelado'::estado_reservacion_enum) < pd.cantidad
+  AND NOT EXISTS (SELECT 1 FROM te_reservaciones r
+         WHERE r.pedido_detalle_id = pd.id AND r.empleado_id = ep.empleado_id AND r.estado <> 'cancelado'::estado_reservacion_enum)
+  AND ep.certeza >= COALESCE(pu.porcentaje_minimo, 0)
+  AND (emp.sucursal_id IS NULL OR p.sucursal_id IS NULL OR emp.sucursal_id = p.sucursal_id)
+  AND NOT EXISTS (
+    SELECT 1 FROM te_lista_negra_empleados ln
+    WHERE ln.tenant_id = emp.tenant_id AND ln.activo
+      AND (ln.sitio_id IS NULL OR ln.sitio_id = p.sitio_id)
+      AND (ln.fecha_expiracion IS NULL OR ln.fecha_expiracion > CURRENT_DATE)
+      AND ((ln.rfc IS NOT NULL AND ln.rfc = emp.rfc) OR (ln.curp IS NOT NULL AND ln.curp = emp.curp))
+  );
+
+-- ---------------------------------------------------------------------------
+-- 3. v_agenda_freelance -- agrega el filtro por empleado que faltaba (bug de
+--    privacidad: sin esto cualquier freelance veía la agenda de cualquier otro)
+-- ---------------------------------------------------------------------------
+CREATE OR REPLACE VIEW v_agenda_freelance AS
+SELECT
+  r.id, r.empleado_id, r.pedido_id, r.pedido_detalle_id, r.puesto_id,
+  r.estado, r.estado_asistencia, r.cita_inicio, r.cita_fin,
+  p.folio AS pedido_folio, p.titulo AS pedido_titulo,
+  s.titulo AS sitio, pu.titulo AS puesto, r.tenant_id
+FROM te_reservaciones r
+JOIN te_pedidos p ON p.id = r.pedido_id
+LEFT JOIN tc_sitios s ON s.id = r.sitio_id
+LEFT JOIN tc_puestos pu ON pu.id = r.puesto_id
+WHERE r.empleado_id = mi_empleado_id();
+
+-- ============================================================================
+
+-- ============================================================================
+-- Migración 013 — Fix real: current_user_id()/current_tenant_id() no leían el
+-- JWT en esta instancia de PostgREST
+-- ============================================================================
+-- Causa raíz encontrada probando el portal freelance en vivo con una cuenta real
+-- (no era config de Supabase -- las JWT Signing Keys del proyecto están correctas,
+-- se verificó en el dashboard): PostgREST en este proyecto expone el claim
+-- agregado `request.jwt.claims` (JSON completo) pero YA NO expone cada claim
+-- individual como `request.jwt.claim.<nombre>` (formato que ambas funciones
+-- usaban). Por eso `current_user_id()` siempre devolvía NULL para cualquier
+-- usuario autenticado -> `mi_empleado_id()` siempre NULL -> el portal freelance
+-- (Publicaciones, Mis eventos) se veía vacío para TODOS los usuarios reales,
+-- aunque el login funcionara perfecto y la vista/RLS estuvieran bien.
+-- Fix: leer primero el JSON agregado (->>'sub'), con fallback al formato viejo
+-- por si alguna vez se vuelve a exponer así.
+-- ============================================================================
+
+CREATE OR REPLACE FUNCTION public.current_user_id()
+ RETURNS uuid
+ LANGUAGE plpgsql
+ STABLE
+AS $function$
+BEGIN
+  RETURN COALESCE(
+    NULLIF(current_setting('app.current_user', true), '')::uuid,
+    NULLIF(current_setting('request.jwt.claims', true)::json->>'sub', '')::uuid,
+    NULLIF(current_setting('request.jwt.claim.sub', true), '')::uuid
+  );
+EXCEPTION WHEN OTHERS THEN
+  RETURN NULL;
+END $function$;
+
+CREATE OR REPLACE FUNCTION public.current_tenant_id()
+ RETURNS uuid
+ LANGUAGE plpgsql
+ STABLE
+AS $function$
+DECLARE h_tenant text;
+BEGIN
+  BEGIN
+    h_tenant := current_setting('request.headers', true)::json->>'x-tenant-id';
+  EXCEPTION WHEN OTHERS THEN
+    h_tenant := NULL;
+  END;
+  RETURN COALESCE(
+    NULLIF(current_setting('app.current_tenant', true), '')::uuid,
+    h_tenant::uuid,
+    NULLIF(current_setting('request.jwt.claims', true)::json->>'sub', '')::uuid,
+    NULLIF(current_setting('request.jwt.claim.sub', true), '')::uuid
+  );
+EXCEPTION WHEN OTHERS THEN
+  RETURN NULL;
+END $function$;
+
+-- ============================================================================
+
+-- ============================================================================
+-- Migración 014 — Fix real: inscribirme_a_publicacion() fallaba en el camino de
+-- respaldo (pedido sin fecha explícita en te_pedido_fechas)
+-- ============================================================================
+-- Encontrado probando el portal freelance en vivo (clic real en "Inscribirme"):
+-- "cannot cast type time with time zone to interval". La rama de respaldo hacía
+-- `hora_inicio::interval` sobre una columna `time with time zone` -- cast
+-- inválido en Postgres. `date + timetz` ya produce `timestamptz` directamente,
+-- no hace falta el cast a interval.
+-- ============================================================================
+
+CREATE OR REPLACE FUNCTION public.inscribirme_a_publicacion(p_detalle uuid)
+ RETURNS uuid
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+AS $function$
+DECLARE
+  det te_pedidos_detalle;
+  fe  te_pedido_fechas;
+  emp uuid;
+  nueva uuid;
+  cita_i timestamptz; cita_f timestamptz;
+BEGIN
+  emp := mi_empleado_id();
+  IF emp IS NULL THEN RAISE EXCEPTION 'Sesión sin empleado ligado (auth_user_id).'; END IF;
+  SELECT * INTO det FROM te_pedidos_detalle WHERE id = p_detalle;
+  IF det.id IS NULL THEN RAISE EXCEPTION 'Detalle no existe.'; END IF;
+  SELECT * INTO fe FROM te_pedido_fechas WHERE id = det.pedido_fecha_id;
+  IF fe.id IS NULL THEN
+    -- Fallback si el pedido no tiene fecha explícita
+    SELECT (fecha_evento + hora_inicio), (fecha_evento + hora_fin)
+      INTO cita_i, cita_f
+      FROM te_pedidos WHERE id = det.pedido_id;
+  ELSE
+    cita_i := (fe.fecha || ' ' || fe.hora_inicio)::timestamptz;
+    cita_f := (fe.fecha || ' ' || fe.hora_fin)::timestamptz;
+    IF cita_f <= cita_i THEN cita_f := cita_f + interval '1 day'; END IF;
+  END IF;
+  INSERT INTO te_reservaciones (
+    tenant_id, pedido_id, pedido_detalle_id, empleado_id, puesto_id,
+    sitio_id, estado, cita_inicio, cita_fin, duracion_en_turnos, creado_por
+  )
+  SELECT current_tenant_id(), det.pedido_id, det.id, emp, det.puesto_id,
+         (SELECT sitio_id FROM te_pedidos WHERE id = det.pedido_id),
+         'confirmado_voluntario', cita_i, cita_f, 1, current_user_id()
+  RETURNING id INTO nueva;
+  RETURN nueva;
+END $function$;
+
+-- ============================================================================
+
+-- ============================================================================
+-- Migración 015 — Fix real: inscribirme_a_publicacion() usaba fecha/hora del
+-- PEDIDO (encabezado) en el fallback, no de la LÍNEA (detalle) -- causaba
+-- traslapes falsos entre líneas de distintos pedidos sin fecha explícita en
+-- te_pedido_fechas, porque te_pedidos.hora_inicio/hora_fin casi siempre están
+-- NULL (el horario real vive por línea en te_pedidos_detalle, confirmado toda
+-- la sesión: Pedido = encabezado, Detalle = matriz de puestos con su propia
+-- fecha_cita/hora_cita_inicio/hora_cita_fin).
+-- Encontrado probando "Inscribirme" en vivo dos veces seguidas: la 2a.
+-- inscripción se rechazó por "Traslape" contra la 1a., aunque eran pedidos y
+-- fechas distintas -- porque ambas colapsaban a NULL/NULL en el fallback viejo.
+-- ============================================================================
+
+CREATE OR REPLACE FUNCTION public.inscribirme_a_publicacion(p_detalle uuid)
+ RETURNS uuid
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+AS $function$
+DECLARE
+  det te_pedidos_detalle;
+  fe  te_pedido_fechas;
+  pu  tc_puestos;
+  emp uuid;
+  nueva uuid;
+  cita_i timestamptz; cita_f timestamptz;
+BEGIN
+  emp := mi_empleado_id();
+  IF emp IS NULL THEN RAISE EXCEPTION 'Sesión sin empleado ligado (auth_user_id).'; END IF;
+  SELECT * INTO det FROM te_pedidos_detalle WHERE id = p_detalle;
+  IF det.id IS NULL THEN RAISE EXCEPTION 'Detalle no existe.'; END IF;
+  SELECT * INTO pu FROM tc_puestos WHERE id = det.puesto_id;
+  SELECT * INTO fe FROM te_pedido_fechas WHERE id = det.pedido_fecha_id;
+  IF fe.id IS NOT NULL THEN
+    cita_i := (fe.fecha || ' ' || fe.hora_inicio)::timestamptz;
+    cita_f := (fe.fecha || ' ' || fe.hora_fin)::timestamptz;
+    IF cita_f <= cita_i THEN cita_f := cita_f + interval '1 day'; END IF;
+  ELSIF det.fecha_cita IS NOT NULL THEN
+    -- Fallback 1: fecha/hora de la LÍNEA (te_pedidos_detalle), no del pedido
+    cita_i := det.fecha_cita + COALESCE(det.hora_cita_inicio, '00:00'::time);
+    cita_f := det.fecha_cita + COALESCE(det.hora_cita_fin,
+                COALESCE(det.hora_cita_inicio, '00:00'::time) + make_interval(hours => COALESCE(pu.duracion_turno_horas, 12)::int));
+    IF cita_f <= cita_i THEN cita_f := cita_f + interval '1 day'; END IF;
+  ELSE
+    -- Fallback 2: último recurso, fecha/hora del pedido (encabezado)
+    SELECT (fecha_evento + hora_inicio), (fecha_evento + hora_fin)
+      INTO cita_i, cita_f
+      FROM te_pedidos WHERE id = det.pedido_id;
+  END IF;
+  INSERT INTO te_reservaciones (
+    tenant_id, pedido_id, pedido_detalle_id, empleado_id, puesto_id,
+    sitio_id, estado, cita_inicio, cita_fin, duracion_en_turnos, creado_por
+  )
+  SELECT current_tenant_id(), det.pedido_id, det.id, emp, det.puesto_id,
+         (SELECT sitio_id FROM te_pedidos WHERE id = det.pedido_id),
+         'confirmado_voluntario', cita_i, cita_f, 1, current_user_id()
+  RETURNING id INTO nueva;
+  RETURN nueva;
+END $function$;
+
+-- ============================================================================
+
+-- ============================================================================
+-- Migración 016 — Backend para login admin + enforcement de permisos en React
+-- ============================================================================
+-- mi_usuario(): datos del usuario interno logueado (análogo a mi_empleado_id())
+-- mis_permisos(): set de códigos de permiso del usuario logueado, para cachear
+-- en el frontend y no llamar tiene_permiso() una por una.
+-- ============================================================================
+
+CREATE OR REPLACE FUNCTION public.mi_usuario()
+ RETURNS TABLE (id uuid, nombre_usuario text, correo text, nombre text, apellido_paterno text, rol_codigo text, rol_nombre text)
+ LANGUAGE sql
+ STABLE
+AS $function$
+  SELECT u.id, u.nombre_usuario, u.correo, u.nombre, u.apellido_paterno, r.codigo, r.nombre
+  FROM te_usuarios u
+  JOIN tr_usuario_rol ur ON ur.usuario_id = u.id
+  JOIN tc_roles r ON r.id = ur.rol_id
+  WHERE u.auth_user_id = current_user_id()
+    AND u.tenant_id = current_tenant_id()
+    AND u.activo AND NOT u.bloqueado
+  LIMIT 1;
+$function$;
+
+CREATE OR REPLACE FUNCTION public.mis_permisos()
+ RETURNS text[]
+ LANGUAGE sql
+ STABLE
+AS $function$
+  SELECT COALESCE(array_agg(DISTINCT rp.permiso_codigo), ARRAY[]::text[])
+  FROM te_usuarios u
+  JOIN tr_usuario_rol ur ON ur.usuario_id = u.id
+  JOIN tr_rol_permiso rp ON rp.rol_id = ur.rol_id
+  WHERE u.auth_user_id = current_user_id()
+    AND u.tenant_id = current_tenant_id()
+    AND u.activo AND NOT u.bloqueado;
+$function$;
+
+GRANT EXECUTE ON FUNCTION mi_usuario() TO anon, authenticated;
+GRANT EXECUTE ON FUNCTION mis_permisos() TO anon, authenticated;
+GRANT EXECUTE ON FUNCTION tiene_permiso(uuid, text) TO anon, authenticated;
+
+-- ============================================================================
+
+-- ============================================================================
+-- Migración 017 — Tenants demo multi-vertical: Construcción, Seguridad
+-- privada y BTL/Activaciones. Objetivo: demostrar que el modelo multi-tenant
+-- por columna (tenant_id + RLS, ver D6) soporta verticales distintas a
+-- eventos/OCESA SIN tocar esquema -- mismos catálogos
+-- tc_sitios/tc_puestos/tc_turnos/tc_clientes/tc_unidades_negocio, mismas
+-- tablas te_empleados/te_pedidos/te_pedidos_detalle, solo datos distintos
+-- por tenant_id. No se agregó ni una columna nueva para esta migración.
+-- ============================================================================
+
+-- ---------------------------------------------------------------------------
+-- 1. Tenants, suscripción, parámetros, aviso de privacidad, tipos de personal
+-- ---------------------------------------------------------------------------
+INSERT INTO te_tenants (id, razon_social, rfc, vertical) VALUES
+  ('00000000-0000-0000-0000-000000000002','Edifica Talento Obra Civil, S.A. de C.V.','ETO260102AB1','construccion'),
+  ('00000000-0000-0000-0000-000000000003','Guardia Total Seguridad Privada, S.A. de C.V.','GTS260103CD2','seguridad_privada'),
+  ('00000000-0000-0000-0000-000000000004','Impacto BTL Promotoras y Activaciones, S.A. de C.V.','IBP260104EF3','btl_activaciones');
+
+INSERT INTO te_suscripciones (tenant_id, plan_codigo) VALUES
+  ('00000000-0000-0000-0000-000000000002','PRO'),
+  ('00000000-0000-0000-0000-000000000003','PRO'),
+  ('00000000-0000-0000-0000-000000000004','PRO');
+
+INSERT INTO tp_parametros_globales (tenant_id) VALUES
+  ('00000000-0000-0000-0000-000000000002'),
+  ('00000000-0000-0000-0000-000000000003'),
+  ('00000000-0000-0000-0000-000000000004');
+
+INSERT INTO tp_avisos_privacidad (tenant_id, version, texto) VALUES
+  ('00000000-0000-0000-0000-000000000002','v1.0','Aviso de privacidad para tratamiento de datos biométricos conforme a LFPDPPP. Revocable en cualquier momento.'),
+  ('00000000-0000-0000-0000-000000000003','v1.0','Aviso de privacidad para tratamiento de datos biométricos conforme a LFPDPPP. Revocable en cualquier momento.'),
+  ('00000000-0000-0000-0000-000000000004','v1.0','Aviso de privacidad para tratamiento de datos biométricos conforme a LFPDPPP. Revocable en cualquier momento.');
+
+INSERT INTO tc_tipos_personal (tenant_id, clave, descripcion) VALUES
+  ('00000000-0000-0000-0000-000000000002','freelance','Personal freelance / eventual'),
+  ('00000000-0000-0000-0000-000000000002','staff','Personal de planta'),
+  ('00000000-0000-0000-0000-000000000003','freelance','Personal freelance / eventual'),
+  ('00000000-0000-0000-0000-000000000003','staff','Personal de planta'),
+  ('00000000-0000-0000-0000-000000000004','freelance','Personal freelance / eventual'),
+  ('00000000-0000-0000-0000-000000000004','staff','Personal de planta');
+
+INSERT INTO tc_tipos_documento (tenant_id, clave, titulo, requerido_alta) VALUES
+  ('00000000-0000-0000-0000-000000000002','ine','INE / IFE vigente', true),
+  ('00000000-0000-0000-0000-000000000002','curp','CURP', true),
+  ('00000000-0000-0000-0000-000000000003','ine','INE / IFE vigente', true),
+  ('00000000-0000-0000-0000-000000000003','curp','CURP', true),
+  ('00000000-0000-0000-0000-000000000004','ine','INE / IFE vigente', true),
+  ('00000000-0000-0000-0000-000000000004','curp','CURP', true);
+
+-- ---------------------------------------------------------------------------
+-- 2. Unidades de negocio, turnos y clientes por tenant
+-- ---------------------------------------------------------------------------
+INSERT INTO tc_unidades_negocio (tenant_id, titulo) VALUES
+  ('00000000-0000-0000-0000-000000000002','Obra Civil'),
+  ('00000000-0000-0000-0000-000000000002','Acabados e Instalaciones'),
+  ('00000000-0000-0000-0000-000000000003','Vigilancia Comercial'),
+  ('00000000-0000-0000-0000-000000000003','Vigilancia Bancaria'),
+  ('00000000-0000-0000-0000-000000000003','Vigilancia Gubernamental'),
+  ('00000000-0000-0000-0000-000000000004','Activaciones Retail'),
+  ('00000000-0000-0000-0000-000000000004','Eventos Especiales');
+
+INSERT INTO tc_turnos (tenant_id, titulo, hora_inicio, hora_fin) VALUES
+  ('00000000-0000-0000-0000-000000000002','Jornada diurna obra','07:00','17:00'),
+  ('00000000-0000-0000-0000-000000000002','Turno colado nocturno','20:00','04:00'),
+  ('00000000-0000-0000-0000-000000000003','Matutino 06-14','06:00','14:00'),
+  ('00000000-0000-0000-0000-000000000003','Vespertino 14-22','14:00','22:00'),
+  ('00000000-0000-0000-0000-000000000003','Nocturno 22-06','22:00','06:00'),
+  ('00000000-0000-0000-0000-000000000003','Turno 24x24','08:00','08:00'),
+  ('00000000-0000-0000-0000-000000000004','Fin de semana AM','10:00','16:00'),
+  ('00000000-0000-0000-0000-000000000004','Fin de semana PM','16:00','21:00'),
+  ('00000000-0000-0000-0000-000000000004','Evento premium','18:00','23:00');
+
+INSERT INTO tc_clientes (tenant_id, razon_social, abreviacion) VALUES
+  ('00000000-0000-0000-0000-000000000002','Grupo Inmobiliario Horizonte, S.A. de C.V.','Horizonte'),
+  ('00000000-0000-0000-0000-000000000002','Constructora Vallarta Residencial','Vallarta'),
+  ('00000000-0000-0000-0000-000000000002','Desarrollos Urbanos del Bajío','DUB'),
+  ('00000000-0000-0000-0000-000000000003','Autoservicios Walmart de México','Walmart'),
+  ('00000000-0000-0000-0000-000000000003','Banregio Grupo Financiero — Sucursales','Banregio'),
+  ('00000000-0000-0000-0000-000000000003','Gobierno del Estado — Oficinas Centrales','Gob. Edo.'),
+  ('00000000-0000-0000-0000-000000000004','Colgate-Palmolive México','Colgate'),
+  ('00000000-0000-0000-0000-000000000004','Grupo Modelo','Modelo'),
+  ('00000000-0000-0000-0000-000000000004','Joyería Diamante & Platino','Diamante & Platino');
+
+-- ---------------------------------------------------------------------------
+-- 3. Sitios por tenant (reutiliza tipo_sitio_enum existente: obra/sucursal/
+--    tienda/oficina/otro -- no requiere valores nuevos de enum)
+-- ---------------------------------------------------------------------------
+INSERT INTO tc_sitios (tenant_id, titulo, tipo_sitio, direccion) VALUES
+  ('00000000-0000-0000-0000-000000000002','Residencial Las Lomas — Torre A','obra','Blvd. Las Lomas 450, Zapopan, Jalisco'),
+  ('00000000-0000-0000-0000-000000000002','Plaza Comercial Norte — Fase 1','obra','Av. Industrias 1200, Querétaro, Querétaro'),
+  ('00000000-0000-0000-0000-000000000002','Nave Industrial Querétaro','obra','Parque Industrial Balvanera, Corregidora, Querétaro'),
+  ('00000000-0000-0000-0000-000000000003','Walmart Satélite','sucursal','Circuito Centro Comercial 2251, Cd. Satélite, Edo. de México'),
+  ('00000000-0000-0000-0000-000000000003','Walmart Universidad','sucursal','Av. Universidad 1000, Cd. de México'),
+  ('00000000-0000-0000-0000-000000000003','CEDIS Walmart Cuautitlán','otro','Parque Industrial Cuamatla, Cuautitlán Izcalli, Edo. de México'),
+  ('00000000-0000-0000-0000-000000000003','Banregio Sucursal Polanco','sucursal','Av. Presidente Masaryk 111, Polanco, Cd. de México'),
+  ('00000000-0000-0000-0000-000000000003','Gobierno Edo. Méx — Oficinas Centrales','oficina','Av. Ignacio Comonfort 1600, Toluca, Edo. de México'),
+  ('00000000-0000-0000-0000-000000000004','Walmart Félix Cuevas','tienda','Av. Félix Cuevas 95, Del Valle, Cd. de México'),
+  ('00000000-0000-0000-0000-000000000004','Walmart Universidad','tienda','Av. Universidad 1000, Cd. de México'),
+  ('00000000-0000-0000-0000-000000000004','Chedraui Toreo','tienda','Av. Toreo, Naucalpan, Edo. de México'),
+  ('00000000-0000-0000-0000-000000000004','La Comer Del Valle','tienda','Av. Coyoacán 1600, Del Valle, Cd. de México'),
+  ('00000000-0000-0000-0000-000000000004','Salón Diamante Polanco','evento','Calle Anatole France 120, Polanco, Cd. de México');
+
+-- ---------------------------------------------------------------------------
+-- 4. Puestos por tenant (sexo_requerido ya existía en tc_puestos -- se usa
+--    aquí tal cual para los puestos de "Modelo", igual que el legado Lobo
+--    traía "Modelo Star 1-5" como puestos con sexo definido; ver pendiente
+--    de tc_productos.id_puesto en CLAUDE.md §11, mismo mecanismo)
+-- ---------------------------------------------------------------------------
+INSERT INTO tc_puestos (tenant_id, titulo, pago_default, duracion_turno_horas, horas_entre_turnos, horas_antes_cancelar, porcentaje_certeza_inicial, porcentaje_minimo, dias_sin_confirmar, requiere_biometrico, tipo_registro_asistencia, ciclo_pago, regimen_pago) VALUES
+  ('00000000-0000-0000-0000-000000000002','Albañil', 450, 10, 0, 24, 1, 0.75, 90, true, 'Requiere Entrada y Salida', 'Semanal', 'Nomina'),
+  ('00000000-0000-0000-0000-000000000002','Ayudante de albañil (Chalán)', 320, 10, 0, 24, 1, 0.70, 90, true, 'Requiere Entrada y Salida', 'Semanal', 'Nomina'),
+  ('00000000-0000-0000-0000-000000000002','Plomero', 500, 10, 0, 24, 1, 0.75, 90, true, 'Requiere Entrada y Salida', 'Semanal', 'Nomina'),
+  ('00000000-0000-0000-0000-000000000002','Electricista de obra', 520, 10, 0, 24, 1, 0.75, 90, true, 'Requiere Entrada y Salida', 'Semanal', 'Nomina'),
+  ('00000000-0000-0000-0000-000000000002','Carpintero de obra (cimbra)', 480, 10, 0, 24, 1, 0.75, 90, true, 'Requiere Entrada y Salida', 'Semanal', 'Nomina'),
+  ('00000000-0000-0000-0000-000000000002','Herrero / Armador', 480, 10, 0, 24, 1, 0.75, 90, true, 'Requiere Entrada y Salida', 'Semanal', 'Nomina'),
+  ('00000000-0000-0000-0000-000000000002','Pintor de obra', 420, 10, 0, 24, 1, 0.75, 90, true, 'Requiere Entrada y Salida', 'Semanal', 'Nomina'),
+  ('00000000-0000-0000-0000-000000000002','Yesero / Aplanador', 430, 10, 0, 24, 1, 0.75, 90, true, 'Requiere Entrada y Salida', 'Semanal', 'Nomina'),
+  ('00000000-0000-0000-0000-000000000002','Operador de maquinaria pesada', 700, 10, 0, 24, 1, 0.85, 90, true, 'Requiere Entrada y Salida', 'Semanal', 'Nomina'),
+  ('00000000-0000-0000-0000-000000000002','Soldador', 550, 10, 0, 24, 1, 0.80, 90, true, 'Requiere Entrada y Salida', 'Semanal', 'Nomina'),
+  ('00000000-0000-0000-0000-000000000002','Topógrafo', 600, 10, 0, 24, 1, 0.80, 90, true, 'Requiere Entrada y Salida', 'Semanal', 'Honorarios Normales'),
+  ('00000000-0000-0000-0000-000000000002','Supervisor de obra', 900, 10, 0, 48, 1, 0.85, 90, true, 'Requiere Entrada y Salida', 'Semanal', 'Nomina'),
+  ('00000000-0000-0000-0000-000000000002','Residente de obra', 1200, 10, 0, 48, 1, 0.90, 90, true, 'Requiere Entrada y Salida', 'Quincenal', 'Nomina'),
+  ('00000000-0000-0000-0000-000000000002','Prevencionista de seguridad e higiene', 650, 10, 0, 24, 1, 0.80, 90, true, 'Requiere Entrada y Salida', 'Semanal', 'Honorarios Normales'),
+
+  ('00000000-0000-0000-0000-000000000003','Vigilante de acceso', 280, 8, 0, 24, 1, 0.80, 60, true, 'Requiere Entrada y Salida', 'Semanal', 'Nomina'),
+  ('00000000-0000-0000-0000-000000000003','Vigilante de piso de ventas', 280, 8, 0, 24, 1, 0.80, 60, true, 'Requiere Entrada y Salida', 'Semanal', 'Nomina'),
+  ('00000000-0000-0000-0000-000000000003','Guardia de CEDIS / Almacén 24x24', 600, 24, 24, 24, 1, 0.85, 60, true, 'Requiere Entrada y Salida', 'Semanal', 'Nomina'),
+  ('00000000-0000-0000-0000-000000000003','Monitorista CCTV', 320, 8, 0, 24, 1, 0.80, 60, true, 'Requiere Entrada y Salida', 'Semanal', 'Nomina'),
+  ('00000000-0000-0000-0000-000000000003','Supervisor de turno', 500, 8, 0, 48, 1, 0.90, 60, true, 'Requiere Entrada y Salida', 'Semanal', 'Nomina'),
+  ('00000000-0000-0000-0000-000000000003','Jefe de zona/plaza', 800, 8, 0, 48, 1, 0.90, 60, true, 'Requiere Entrada y Salida', 'Quincenal', 'Nomina'),
+  ('00000000-0000-0000-0000-000000000003','Escolta de valores', 450, 8, 0, 24, 1, 0.90, 60, true, 'Requiere Entrada y Salida', 'Semanal', 'Honorarios Normales'),
+
+  ('00000000-0000-0000-0000-000000000004','Promotora / Impulsadora', 450, 6, 0, 48, 1, 0.75, 60, true, 'Requiere Entrada y Salida', 'Semanal', 'Honorarios Asimilables'),
+  ('00000000-0000-0000-0000-000000000004','Demostrador(a) de producto', 450, 6, 0, 48, 1, 0.75, 60, true, 'Requiere Entrada y Salida', 'Semanal', 'Honorarios Asimilables'),
+  ('00000000-0000-0000-0000-000000000004','Edecán', 500, 5, 0, 48, 1, 0.80, 60, true, 'Requiere Entrada y Salida', 'Semanal', 'Honorarios Asimilables'),
+  ('00000000-0000-0000-0000-000000000004','Supervisor de piso', 700, 6, 0, 48, 1, 0.85, 60, true, 'Requiere Entrada y Salida', 'Semanal', 'Honorarios Normales'),
+  ('00000000-0000-0000-0000-000000000004','Coordinador de activación', 900, 8, 0, 48, 1, 0.90, 60, true, 'Requiere Entrada y Salida', 'Semanal', 'Honorarios Normales')
+;
+
+-- Puestos de "Modelo" con sexo_requerido explícito (mismo mecanismo que el
+-- legado Lobo usaba para "Modelo Star 1-5"; aquí se usa correctamente desde
+-- el catálogo en vez de texto libre)
+INSERT INTO tc_puestos (tenant_id, titulo, pago_default, duracion_turno_horas, horas_entre_turnos, horas_antes_cancelar, porcentaje_certeza_inicial, porcentaje_minimo, dias_sin_confirmar, requiere_biometrico, tipo_registro_asistencia, ciclo_pago, regimen_pago, sexo_requerido) VALUES
+  ('00000000-0000-0000-0000-000000000004','Modelo Evento Premium Femenino', 1800, 5, 0, 72, 1, 0.90, 60, true, 'Requiere Entrada y Salida', 'Semanal', 'Honorarios Asimilables', 'F'),
+  ('00000000-0000-0000-0000-000000000004','Modelo Evento Premium Masculino', 1800, 5, 0, 72, 1, 0.90, 60, true, 'Requiere Entrada y Salida', 'Semanal', 'Honorarios Asimilables', 'M');
+
+-- ---------------------------------------------------------------------------
+-- 5. Roles + permisos por tenant (mismo catálogo global tc_permisos, mismo
+--    criterio de asignación que el tenant demo original)
+-- ---------------------------------------------------------------------------
+INSERT INTO tc_roles (tenant_id, codigo, nombre, descripcion, es_sistema)
+SELECT t, 'administrador', 'Administrador', 'Control total del sistema', true FROM (VALUES
+  ('00000000-0000-0000-0000-000000000002'::uuid),
+  ('00000000-0000-0000-0000-000000000003'::uuid),
+  ('00000000-0000-0000-0000-000000000004'::uuid)) AS v(t)
+UNION ALL
+SELECT t, 'operacion', 'Operación', 'Gestión día a día: pedidos, asignación, checador', true FROM (VALUES
+  ('00000000-0000-0000-0000-000000000002'::uuid),
+  ('00000000-0000-0000-0000-000000000003'::uuid),
+  ('00000000-0000-0000-0000-000000000004'::uuid)) AS v(t);
+
+INSERT INTO tr_rol_permiso (tenant_id, rol_id, permiso_codigo)
+SELECT r.tenant_id, r.id, p.codigo
+FROM tc_roles r, tc_permisos p
+WHERE r.tenant_id IN ('00000000-0000-0000-0000-000000000002','00000000-0000-0000-0000-000000000003','00000000-0000-0000-0000-000000000004')
+  AND r.codigo = 'administrador';
+
+INSERT INTO tr_rol_permiso (tenant_id, rol_id, permiso_codigo)
+SELECT r.tenant_id, r.id, p.codigo
+FROM tc_roles r, tc_permisos p
+WHERE r.tenant_id IN ('00000000-0000-0000-0000-000000000002','00000000-0000-0000-0000-000000000003','00000000-0000-0000-0000-000000000004')
+  AND r.codigo = 'operacion'
+  AND p.modulo IN ('candidatos','vacantes','requisiciones','pedidos','reservaciones','empleados','checador','reportes')
+  AND p.accion <> 'aprobar';
+INSERT INTO tr_rol_permiso (tenant_id, rol_id, permiso_codigo)
+SELECT r.tenant_id, r.id, 'catalogos.ver'
+FROM tc_roles r
+WHERE r.tenant_id IN ('00000000-0000-0000-0000-000000000002','00000000-0000-0000-0000-000000000003','00000000-0000-0000-0000-000000000004')
+  AND r.codigo = 'operacion';
+
+-- Nota: igual que en el tenant demo original, NO se crea fila en te_usuarios
+-- aquí (requiere auth_user_id real de Supabase Auth). Las cuentas de prueba
+-- para "brincar" entre estos 3 tenants se dan de alta con el script aparte
+-- db/seed_demo_usuarios_multiempresa.sql (mismo mecanismo que las cuentas de
+-- §10 del CLAUDE.md: INSERT directo en auth.users, dominio @peoplemovil.demo).
+
+-- ---------------------------------------------------------------------------
+-- 6. Empleados demo por tenant (folio consecutivo por tenant_id, igual que
+--    el tenant original). rfc/curp/telefono/correo se dejan NULL a propósito
+--    -- son datos ficticios de demo, no hace falta inventar identificadores
+--    que parezcan reales. foto_url usa avatares sintéticos (DiceBear, API
+--    pública determinista por seed) para poblar el campo sin subir fotos de
+--    personas reales ni generar rostros fotorrealistas falsos.
+-- ---------------------------------------------------------------------------
+
+-- Tenant 2 — Construcción: 10 albañiles, 2 plomeros, 3 carpinteros + soporte
+-- (el ejemplo exacto que se pidió: "10 albañiles, 2 plomeros, 3 carpinteros")
+INSERT INTO te_empleados (tenant_id, folio, nombres, apellido_paterno, apellido_materno, sexo, id_puesto_principal, id_sitio_principal, regimen_pago, ciclo_pago, foto_url)
+SELECT '00000000-0000-0000-0000-000000000002', v.folio, v.nombres, v.ap, v.am, v.sexo::sexo_enum,
+       (SELECT id FROM tc_puestos WHERE tenant_id='00000000-0000-0000-0000-000000000002' AND titulo=v.puesto),
+       (SELECT id FROM tc_sitios  WHERE tenant_id='00000000-0000-0000-0000-000000000002' AND titulo='Residencial Las Lomas — Torre A'),
+       'Nomina','Semanal',
+       'https://api.dicebear.com/9.x/personas/svg?seed=pm-t2-' || v.folio
+FROM (VALUES
+  (1,'Jorge','Hernández','Pérez','M','Albañil'),
+  (2,'Martín','Gómez','Luna','M','Albañil'),
+  (3,'Rafael','Torres','Ibarra','M','Albañil'),
+  (4,'Salvador','Reyes','Campos','M','Albañil'),
+  (5,'Eduardo','Vargas','Soto','M','Albañil'),
+  (6,'Francisco','Jiménez','Ruiz','M','Albañil'),
+  (7,'Alberto','Morales','Cruz','M','Albañil'),
+  (8,'Ricardo','Flores','Medina','M','Albañil'),
+  (9,'Juan Carlos','Ramírez','Ortiz','M','Albañil'),
+  (10,'Pedro','Sánchez','Nava','M','Albañil'),
+  (11,'Luis Ángel','Castillo','Mora','M','Plomero'),
+  (12,'Miguel Ángel','Rosales','Vega','M','Plomero'),
+  (13,'Daniel','Herrera','Paredes','M','Carpintero de obra (cimbra)'),
+  (14,'Ignacio','Domínguez','Rivas','M','Carpintero de obra (cimbra)'),
+  (15,'Hugo','Benítez','Salas','M','Carpintero de obra (cimbra)'),
+  (16,'Carlos Eduardo','Lemus','Prado','M','Electricista de obra'),
+  (17,'Oscar','Villanueva','Cano','M','Operador de maquinaria pesada'),
+  (18,'Mario Alberto','Zúñiga','Peña','M','Prevencionista de seguridad e higiene'),
+  (19,'Patricia','Luna','Esquivel','F','Supervisor de obra'),
+  (20,'Roberto','Cantú','Elizondo','M','Residente de obra')
+) AS v(folio,nombres,ap,am,sexo,puesto);
+
+INSERT INTO tr_empleado_plaza (tenant_id, empleado_id, puesto_id, porcentaje_puntualidad)
+SELECT '00000000-0000-0000-0000-000000000002', e.id, e.id_puesto_principal, 0.95
+FROM te_empleados e WHERE e.tenant_id='00000000-0000-0000-0000-000000000002';
+
+-- Tenant 3 — Seguridad privada
+INSERT INTO te_empleados (tenant_id, folio, nombres, apellido_paterno, apellido_materno, sexo, id_puesto_principal, id_sitio_principal, regimen_pago, ciclo_pago, foto_url)
+SELECT '00000000-0000-0000-0000-000000000003', v.folio, v.nombres, v.ap, v.am, v.sexo::sexo_enum,
+       (SELECT id FROM tc_puestos WHERE tenant_id='00000000-0000-0000-0000-000000000003' AND titulo=v.puesto),
+       (SELECT id FROM tc_sitios  WHERE tenant_id='00000000-0000-0000-0000-000000000003' AND titulo=v.sitio),
+       'Nomina','Semanal',
+       'https://api.dicebear.com/9.x/personas/svg?seed=pm-t3-' || v.folio
+FROM (VALUES
+  (1,'José Luis','Aguilar','Mendoza','M','Vigilante de acceso','Walmart Satélite'),
+  (2,'Marcos Antonio','Pineda','Ríos','M','Vigilante de acceso','Walmart Satélite'),
+  (3,'Felipe de Jesús','Gutiérrez','Mata','M','Vigilante de acceso','Walmart Satélite'),
+  (4,'Erika Patricia','Núñez','Soria','F','Vigilante de piso de ventas','Walmart Universidad'),
+  (5,'Brenda Carolina','Reséndiz','León','F','Vigilante de piso de ventas','Walmart Universidad'),
+  (6,'Omar Alejandro','Cedillo','Bravo','M','Vigilante de piso de ventas','Walmart Universidad'),
+  (7,'Víctor Manuel','Solano','Pacheco','M','Guardia de CEDIS / Almacén 24x24','CEDIS Walmart Cuautitlán'),
+  (8,'Lizbeth Guadalupe','Marín','Ochoa','F','Monitorista CCTV','CEDIS Walmart Cuautitlán'),
+  (9,'Sergio Iván','Palacios','Guzmán','M','Supervisor de turno','Walmart Satélite'),
+  (10,'Rodrigo Esteban','Varela','Montes','M','Jefe de zona/plaza','Walmart Satélite')
+) AS v(folio,nombres,ap,am,sexo,puesto,sitio);
+
+INSERT INTO tr_empleado_plaza (tenant_id, empleado_id, puesto_id, porcentaje_puntualidad)
+SELECT '00000000-0000-0000-0000-000000000003', e.id, e.id_puesto_principal, 0.95
+FROM te_empleados e WHERE e.tenant_id='00000000-0000-0000-0000-000000000003';
+
+-- Tenant 4 — BTL / Promotoras y Activaciones
+INSERT INTO te_empleados (tenant_id, folio, nombres, apellido_paterno, apellido_materno, sexo, id_puesto_principal, id_sitio_principal, regimen_pago, ciclo_pago, foto_url)
+SELECT '00000000-0000-0000-0000-000000000004', v.folio, v.nombres, v.ap, v.am, v.sexo::sexo_enum,
+       (SELECT id FROM tc_puestos WHERE tenant_id='00000000-0000-0000-0000-000000000004' AND titulo=v.puesto),
+       (SELECT id FROM tc_sitios  WHERE tenant_id='00000000-0000-0000-0000-000000000004' AND titulo=v.sitio),
+       'Honorarios Asimilables','Semanal',
+       'https://api.dicebear.com/9.x/personas/svg?seed=pm-t4-' || v.folio
+FROM (VALUES
+  (1,'Daniela Fernanda','Ruiz','Contreras','F','Promotora / Impulsadora','Walmart Félix Cuevas'),
+  (2,'Ana Paola','Sandoval','Rico','F','Promotora / Impulsadora','Chedraui Toreo'),
+  (3,'Montserrat','Avilés','Guerrero','F','Promotora / Impulsadora','Walmart Félix Cuevas'),
+  (4,'Jessica Alejandra','Correa','Nieto','F','Promotora / Impulsadora','Chedraui Toreo'),
+  (5,'Karla Michelle','Barrera','Soto','F','Demostrador(a) de producto','La Comer Del Valle'),
+  (6,'Fernando Iván','Cervantes','Lara','M','Demostrador(a) de producto','Walmart Universidad'),
+  (7,'Diana Laura','Prieto','Valencia','F','Edecán','Salón Diamante Polanco'),
+  (8,'Paulina Itzel','Marroquín','Osorio','F','Edecán','Salón Diamante Polanco'),
+  (9,'Gerardo Emmanuel','Tapia','Robles','M','Supervisor de piso','Walmart Félix Cuevas'),
+  (10,'Lucía Fernanda','Calderón','Ibarra','F','Coordinador de activación','Salón Diamante Polanco'),
+  (11,'Alexa Sofía','Montaño','Delgado','F','Modelo Evento Premium Femenino','Salón Diamante Polanco'),
+  (12,'Christian Eduardo','Lozano','Beltrán','M','Modelo Evento Premium Masculino','Salón Diamante Polanco')
+) AS v(folio,nombres,ap,am,sexo,puesto,sitio);
+
+INSERT INTO tr_empleado_plaza (tenant_id, empleado_id, puesto_id, porcentaje_puntualidad)
+SELECT '00000000-0000-0000-0000-000000000004', e.id, e.id_puesto_principal, 0.95
+FROM te_empleados e WHERE e.tenant_id='00000000-0000-0000-0000-000000000004';
+
+-- ---------------------------------------------------------------------------
+-- 7. Pedidos de ejemplo por tenant -- casos exactos descritos en la sesión:
+--    construcción (10 albañiles/2 plomeros/3 carpinteros en una obra),
+--    seguridad (relevos de 8h cubriendo 24h, y turno único 24x24 en CEDIS),
+--    BTL (activación de fin de semana para Colgate, evento premium con
+--    modelos para una marca de lujo).
+-- ---------------------------------------------------------------------------
+
+-- Tenant 2 — Construcción
+INSERT INTO te_pedidos (tenant_id, folio, titulo, sitio_id, cliente_id, fecha_evento, status)
+VALUES (
+  '00000000-0000-0000-0000-000000000002', 1,
+  'Dotación de personal — Residencial Las Lomas Torre A (semana 1)',
+  (SELECT id FROM tc_sitios WHERE tenant_id='00000000-0000-0000-0000-000000000002' AND titulo='Residencial Las Lomas — Torre A'),
+  (SELECT id FROM tc_clientes WHERE tenant_id='00000000-0000-0000-0000-000000000002' AND razon_social='Grupo Inmobiliario Horizonte, S.A. de C.V.'),
+  '2026-10-12','liberado'
+);
+
+INSERT INTO te_pedidos_detalle (tenant_id, pedido_id, puesto_id, turno_id, cantidad, costo_unit, fecha_cita, hora_cita_inicio, hora_cita_fin, status_detalle)
+SELECT '00000000-0000-0000-0000-000000000002',
+  (SELECT id FROM te_pedidos WHERE tenant_id='00000000-0000-0000-0000-000000000002' AND folio=1),
+  (SELECT id FROM tc_puestos WHERE tenant_id='00000000-0000-0000-0000-000000000002' AND titulo=v.puesto),
+  (SELECT id FROM tc_turnos  WHERE tenant_id='00000000-0000-0000-0000-000000000002' AND titulo='Jornada diurna obra'),
+  v.cantidad, v.costo, '2026-10-12','07:00','17:00','liberado'
+FROM (VALUES
+  ('Albañil',10,450),
+  ('Plomero',2,500),
+  ('Carpintero de obra (cimbra)',3,480)
+) AS v(puesto,cantidad,costo);
+
+-- Tenant 3 — Seguridad privada
+INSERT INTO te_pedidos (tenant_id, folio, titulo, sitio_id, cliente_id, fecha_evento, status) VALUES
+  ('00000000-0000-0000-0000-000000000003', 1, 'Vigilancia Walmart Satélite — Octubre 2026',
+   (SELECT id FROM tc_sitios WHERE tenant_id='00000000-0000-0000-0000-000000000003' AND titulo='Walmart Satélite'),
+   (SELECT id FROM tc_clientes WHERE tenant_id='00000000-0000-0000-0000-000000000003' AND razon_social='Autoservicios Walmart de México'),
+   '2026-10-01','liberado'),
+  ('00000000-0000-0000-0000-000000000003', 2, 'Vigilancia CEDIS Cuautitlán — Octubre 2026',
+   (SELECT id FROM tc_sitios WHERE tenant_id='00000000-0000-0000-0000-000000000003' AND titulo='CEDIS Walmart Cuautitlán'),
+   (SELECT id FROM tc_clientes WHERE tenant_id='00000000-0000-0000-0000-000000000003' AND razon_social='Autoservicios Walmart de México'),
+   '2026-10-01','liberado'),
+  ('00000000-0000-0000-0000-000000000003', 3, 'Vigilancia Banregio Sucursal Polanco',
+   (SELECT id FROM tc_sitios WHERE tenant_id='00000000-0000-0000-0000-000000000003' AND titulo='Banregio Sucursal Polanco'),
+   (SELECT id FROM tc_clientes WHERE tenant_id='00000000-0000-0000-0000-000000000003' AND razon_social='Banregio Grupo Financiero — Sucursales'),
+   '2026-10-01','liberado'),
+  ('00000000-0000-0000-0000-000000000003', 4, 'Vigilancia Oficinas Gobierno Edo. Méx.',
+   (SELECT id FROM tc_sitios WHERE tenant_id='00000000-0000-0000-0000-000000000003' AND titulo='Gobierno Edo. Méx — Oficinas Centrales'),
+   (SELECT id FROM tc_clientes WHERE tenant_id='00000000-0000-0000-0000-000000000003' AND razon_social='Gobierno del Estado — Oficinas Centrales'),
+   '2026-10-01','liberado');
+
+-- Walmart Satélite: 3 relevos de 8h cubren las 24h (como se describió: uno en la mañana, otro en la tarde, otro en la noche)
+INSERT INTO te_pedidos_detalle (tenant_id, pedido_id, puesto_id, turno_id, cantidad, costo_unit, fecha_cita, hora_cita_inicio, hora_cita_fin, status_detalle)
+SELECT '00000000-0000-0000-0000-000000000003',
+  (SELECT id FROM te_pedidos WHERE tenant_id='00000000-0000-0000-0000-000000000003' AND folio=1),
+  (SELECT id FROM tc_puestos WHERE tenant_id='00000000-0000-0000-0000-000000000003' AND titulo='Vigilante de acceso'),
+  (SELECT id FROM tc_turnos  WHERE tenant_id='00000000-0000-0000-0000-000000000003' AND titulo=v.turno),
+  1, 280, '2026-10-01', v.hi::time, v.hf::time, 'liberado'
+FROM (VALUES ('Matutino 06-14','06:00','14:00'),('Vespertino 14-22','14:00','22:00'),('Nocturno 22-06','22:00','06:00')) AS v(turno,hi,hf);
+
+-- CEDIS Cuautitlán: un solo vigilante en turno 24x24 (como se describió)
+INSERT INTO te_pedidos_detalle (tenant_id, pedido_id, puesto_id, turno_id, cantidad, costo_unit, fecha_cita, hora_cita_inicio, hora_cita_fin, status_detalle)
+VALUES (
+  '00000000-0000-0000-0000-000000000003',
+  (SELECT id FROM te_pedidos WHERE tenant_id='00000000-0000-0000-0000-000000000003' AND folio=2),
+  (SELECT id FROM tc_puestos WHERE tenant_id='00000000-0000-0000-0000-000000000003' AND titulo='Guardia de CEDIS / Almacén 24x24'),
+  (SELECT id FROM tc_turnos  WHERE tenant_id='00000000-0000-0000-0000-000000000003' AND titulo='Turno 24x24'),
+  1, 600, '2026-10-01', '08:00', '08:00', 'liberado'
+);
+
+-- Banregio Polanco: solo horario bancario (matutino + vespertino, sin nocturno)
+INSERT INTO te_pedidos_detalle (tenant_id, pedido_id, puesto_id, turno_id, cantidad, costo_unit, fecha_cita, hora_cita_inicio, hora_cita_fin, status_detalle)
+SELECT '00000000-0000-0000-0000-000000000003',
+  (SELECT id FROM te_pedidos WHERE tenant_id='00000000-0000-0000-0000-000000000003' AND folio=3),
+  (SELECT id FROM tc_puestos WHERE tenant_id='00000000-0000-0000-0000-000000000003' AND titulo='Vigilante de acceso'),
+  (SELECT id FROM tc_turnos  WHERE tenant_id='00000000-0000-0000-0000-000000000003' AND titulo=v.turno),
+  1, 280, '2026-10-01', v.hi::time, v.hf::time, 'liberado'
+FROM (VALUES ('Matutino 06-14','06:00','14:00'),('Vespertino 14-22','14:00','22:00')) AS v(turno,hi,hf);
+
+-- Gobierno Edo. Méx: mismo esquema que el banco
+INSERT INTO te_pedidos_detalle (tenant_id, pedido_id, puesto_id, turno_id, cantidad, costo_unit, fecha_cita, hora_cita_inicio, hora_cita_fin, status_detalle)
+SELECT '00000000-0000-0000-0000-000000000003',
+  (SELECT id FROM te_pedidos WHERE tenant_id='00000000-0000-0000-0000-000000000003' AND folio=4),
+  (SELECT id FROM tc_puestos WHERE tenant_id='00000000-0000-0000-0000-000000000003' AND titulo='Vigilante de acceso'),
+  (SELECT id FROM tc_turnos  WHERE tenant_id='00000000-0000-0000-0000-000000000003' AND titulo=v.turno),
+  1, 280, '2026-10-01', v.hi::time, v.hf::time, 'liberado'
+FROM (VALUES ('Matutino 06-14','06:00','14:00'),('Vespertino 14-22','14:00','22:00')) AS v(turno,hi,hf);
+
+-- Tenant 4 — BTL / Promotoras
+INSERT INTO te_pedidos (tenant_id, folio, titulo, sitio_id, cliente_id, fecha_evento, status) VALUES
+  ('00000000-0000-0000-0000-000000000004', 1, 'Activación Colgate — Walmart Félix Cuevas (fines de semana de octubre)',
+   (SELECT id FROM tc_sitios WHERE tenant_id='00000000-0000-0000-0000-000000000004' AND titulo='Walmart Félix Cuevas'),
+   (SELECT id FROM tc_clientes WHERE tenant_id='00000000-0000-0000-0000-000000000004' AND razon_social='Colgate-Palmolive México'),
+   '2026-10-10','liberado'),
+  ('00000000-0000-0000-0000-000000000004', 2, 'Activación Colgate — Chedraui Toreo (fines de semana de octubre)',
+   (SELECT id FROM tc_sitios WHERE tenant_id='00000000-0000-0000-0000-000000000004' AND titulo='Chedraui Toreo'),
+   (SELECT id FROM tc_clientes WHERE tenant_id='00000000-0000-0000-0000-000000000004' AND razon_social='Colgate-Palmolive México'),
+   '2026-10-10','liberado'),
+  ('00000000-0000-0000-0000-000000000004', 3, 'Lanzamiento Colección Diamante — Salón Diamante Polanco',
+   (SELECT id FROM tc_sitios WHERE tenant_id='00000000-0000-0000-0000-000000000004' AND titulo='Salón Diamante Polanco'),
+   (SELECT id FROM tc_clientes WHERE tenant_id='00000000-0000-0000-0000-000000000004' AND razon_social='Joyería Diamante & Platino'),
+   '2026-11-13','liberado');
+
+-- Colgate solo sábado y domingo (como se describió: "¿oye dónde están de lunes a viernes?")
+INSERT INTO te_pedidos_detalle (tenant_id, pedido_id, puesto_id, turno_id, cantidad, costo_unit, fecha_cita, hora_cita_inicio, hora_cita_fin, status_detalle, indicaciones_especiales)
+SELECT '00000000-0000-0000-0000-000000000004',
+  (SELECT id FROM te_pedidos WHERE tenant_id='00000000-0000-0000-0000-000000000004' AND folio=1),
+  (SELECT id FROM tc_puestos WHERE tenant_id='00000000-0000-0000-0000-000000000004' AND titulo='Promotora / Impulsadora'),
+  (SELECT id FROM tc_turnos  WHERE tenant_id='00000000-0000-0000-0000-000000000004' AND titulo=v.turno),
+  2, 450, '2026-10-10', v.hi::time, v.hf::time, 'liberado',
+  'Cobertura SOLO sábado y domingo (no entre semana); exhibir e impulsar línea de cuidado bucal Colgate.'
+FROM (VALUES ('Fin de semana AM','10:00','16:00'),('Fin de semana PM','16:00','21:00')) AS v(turno,hi,hf);
+
+INSERT INTO te_pedidos_detalle (tenant_id, pedido_id, puesto_id, turno_id, cantidad, costo_unit, fecha_cita, hora_cita_inicio, hora_cita_fin, status_detalle, indicaciones_especiales)
+SELECT '00000000-0000-0000-0000-000000000004',
+  (SELECT id FROM te_pedidos WHERE tenant_id='00000000-0000-0000-0000-000000000004' AND folio=2),
+  (SELECT id FROM tc_puestos WHERE tenant_id='00000000-0000-0000-0000-000000000004' AND titulo='Promotora / Impulsadora'),
+  (SELECT id FROM tc_turnos  WHERE tenant_id='00000000-0000-0000-0000-000000000004' AND titulo=v.turno),
+  1, 450, '2026-10-10', v.hi::time, v.hf::time, 'liberado',
+  'Cobertura SOLO sábado y domingo (no entre semana); exhibir e impulsar línea de cuidado bucal Colgate.'
+FROM (VALUES ('Fin de semana AM','10:00','16:00'),('Fin de semana PM','16:00','21:00')) AS v(turno,hi,hf);
+
+-- Evento de lujo: requiere modelos profesionales, no impulsadoras genéricas,
+-- mezcla de hombres y mujeres con características específicas (como se
+-- describió en la sesión) -- el requisito ad-hoc va en indicaciones_especiales
+-- del detalle, NO como columna nueva de esquema; el sexo estructural del
+-- puesto ya viene de tc_puestos.sexo_requerido (ver sección 4).
+INSERT INTO te_pedidos_detalle (tenant_id, pedido_id, puesto_id, turno_id, cantidad, costo_unit, fecha_cita, hora_cita_inicio, hora_cita_fin, status_detalle, indicaciones_especiales) VALUES
+  ('00000000-0000-0000-0000-000000000004',
+   (SELECT id FROM te_pedidos WHERE tenant_id='00000000-0000-0000-0000-000000000004' AND folio=3),
+   (SELECT id FROM tc_puestos WHERE tenant_id='00000000-0000-0000-0000-000000000004' AND titulo='Modelo Evento Premium Femenino'),
+   (SELECT id FROM tc_turnos  WHERE tenant_id='00000000-0000-0000-0000-000000000004' AND titulo='Evento premium'),
+   2, 1800, '2026-11-13', '18:00','23:00', 'liberado',
+   'Evento de lujo: requiere modelos profesionales con experiencia en pasarela, imagen cuidada, altura mínima 1.70m. No impulsadoras genéricas.'),
+  ('00000000-0000-0000-0000-000000000004',
+   (SELECT id FROM te_pedidos WHERE tenant_id='00000000-0000-0000-0000-000000000004' AND folio=3),
+   (SELECT id FROM tc_puestos WHERE tenant_id='00000000-0000-0000-0000-000000000004' AND titulo='Modelo Evento Premium Masculino'),
+   (SELECT id FROM tc_turnos  WHERE tenant_id='00000000-0000-0000-0000-000000000004' AND titulo='Evento premium'),
+   2, 1800, '2026-11-13', '18:00','23:00', 'liberado',
+   'Evento de lujo: requiere modelos profesionales con experiencia en pasarela, imagen cuidada, altura mínima 1.80m. No impulsadoras genéricas.');

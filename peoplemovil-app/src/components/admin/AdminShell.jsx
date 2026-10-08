@@ -1,45 +1,56 @@
 import React, { useState } from 'react';
 import { NavLink, Outlet } from 'react-router-dom';
+import { useAdminAuth } from '../../lib/AdminAuthContext.jsx';
+import { supabaseReady } from '../../lib/supabase.js';
 
+// requiere: código de permiso necesario para ver el item (null = visible para cualquier usuario logueado)
 const SECCIONES = [
   { titulo: 'Operación', items: [
-    { path: '/admin/dashboard',      label: 'Dashboard' },
-    { path: '/admin/sitios',         label: 'Pedidos y sitios' },
-    { path: '/admin/arbol',          label: 'Árbol de reservaciones' },
-    { path: '/admin/preasignacion',  label: 'Pre-asignación' },
-    { path: '/admin/asistencia',     label: 'Confirmación asistencia' },
-    { path: '/admin/checador',       label: 'Checador biométrico' },
-    { path: '/admin/nomina',         label: 'Nómina' }
+    { path: '/admin/dashboard',      label: 'Dashboard', requiere: null },
+    { path: '/admin/sitios',         label: 'Pedidos y sitios', requiere: 'pedidos.ver' },
+    { path: '/admin/arbol',          label: 'Árbol de reservaciones', requiere: 'reservaciones.ver' },
+    { path: '/admin/preasignacion',  label: 'Pre-asignación', requiere: 'reservaciones.ver' },
+    { path: '/admin/asistencia',     label: 'Confirmación asistencia', requiere: 'checador.ver' },
+    { path: '/admin/checador',       label: 'Checador biométrico', requiere: 'checador.ver' },
+    { path: '/admin/nomina',         label: 'Nómina', requiere: 'nomina.ver' }
   ]},
   { titulo: 'Comercial', items: [
-    { path: '/admin/requisiciones', label: 'Requisiciones de personal' },
-    { path: '/admin/facturacion',   label: 'Facturación' }
+    { path: '/admin/requisiciones', label: 'Requisiciones de personal', requiere: 'requisiciones.ver' },
+    { path: '/admin/facturacion',   label: 'Facturación', requiere: 'facturacion.ver' }
   ]},
   { titulo: 'Reclutamiento', items: [
-    { path: '/admin/personal',                label: 'Empleados y candidatos' },
-    { path: '/admin/funnel',                  label: 'Funnel de selección' },
-    { path: '/admin/calendario-entrevistas',  label: 'Calendario entrevistas' },
-    { path: '/admin/alta-masiva',             label: 'Alta masiva empleados' }
+    { path: '/admin/personal',                label: 'Empleados y candidatos', requiere: 'empleados.ver' },
+    { path: '/admin/funnel',                  label: 'Funnel de selección', requiere: 'vacantes.ver' },
+    { path: '/admin/calendario-entrevistas',  label: 'Calendario entrevistas', requiere: 'candidatos.ver' },
+    { path: '/admin/alta-masiva',             label: 'Alta masiva empleados', requiere: 'empleados.crear' }
   ]},
   { titulo: 'Analítica', items: [
-    { path: '/admin/dw',            label: 'Data Warehouse' }
+    { path: '/admin/dw',            label: 'Data Warehouse', requiere: 'reportes.ver' }
   ]},
   { titulo: 'Administración', items: [
-    { path: '/admin/catalogos',     label: 'Catálogos (HU 9.01)' },
-    { path: '/admin/usuarios',      label: 'Usuarios y roles (HU 9.03)' },
-    { path: '/admin/config',        label: 'Configuración' },
-    { path: '/admin/suscripcion',   label: 'Mi suscripción' },
-    { path: '/admin/pricing',       label: 'Pricing público' }
+    { path: '/admin/catalogos',     label: 'Catálogos (HU 9.01)', requiere: 'catalogos.ver' },
+    { path: '/admin/usuarios',      label: 'Usuarios y roles (HU 9.03)', requiere: 'usuarios.ver' },
+    { path: '/admin/config',        label: 'Configuración', requiere: null },
+    { path: '/admin/suscripcion',   label: 'Mi suscripción', requiere: null },
+    { path: '/admin/pricing',       label: 'Pricing público', requiere: null }
   ]},
   { titulo: 'Soporte / Dev', items: [
-    { path: '/admin/utilerias',     label: 'Utilerías (explorador)' },
-    { path: '/admin/bitacora',      label: 'Bitácora de accesos' }
+    { path: '/admin/utilerias',     label: 'Utilerías (explorador)', requiere: 'usuarios.ver' },
+    { path: '/admin/bitacora',      label: 'Bitácora de accesos', requiere: 'usuarios.ver' }
   ]}
 ];
 
 export default function AdminShell() {
   const [openMobile, setOpenMobile] = useState(false);
   const ambiente = import.meta.env.VITE_AMBIENTE;
+  const { usuario, hasPermiso, signOut } = useAdminAuth();
+
+  const secciones = supabaseReady && usuario
+    ? SECCIONES
+        .map(g => ({ ...g, items: g.items.filter(it => !it.requiere || hasPermiso(it.requiere)) }))
+        .filter(g => g.items.length > 0)
+    : SECCIONES; // sin Supabase conectado o cargando: mostrar todo (modo demo)
+
   return (
     <div className="app-layout">
       <aside className={'sidebar' + (openMobile ? ' open' : '')}>
@@ -52,7 +63,7 @@ export default function AdminShell() {
             </div>
           </div>
         </div>
-        {SECCIONES.map(g => (
+        {secciones.map(g => (
           <React.Fragment key={g.titulo}>
             <div className="nav-section">{g.titulo}</div>
             {g.items.map(it => (
@@ -77,6 +88,14 @@ export default function AdminShell() {
             <span style={{ fontSize: 12, color: 'var(--muted)', fontWeight: 700 }}>Tenant demo</span>
             <span className="badge proceso">PLAN PRO</span>
             {ambiente && ambiente !== 'PRODUCCION' && <span className="env-badge">{ambiente}</span>}
+            {usuario && (
+              <>
+                <span style={{ fontSize: 12, color: 'var(--muted)' }}>
+                  {usuario.nombre || usuario.nombre_usuario} · <strong>{usuario.rol_nombre}</strong>
+                </span>
+                <button className="btn ghost sm" onClick={signOut}>Cerrar sesión</button>
+              </>
+            )}
           </div>
         </div>
         <Outlet />

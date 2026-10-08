@@ -3,6 +3,9 @@ import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 
 // Admin (interno)
 import AdminShell from './components/admin/AdminShell.jsx';
+import AdminLogin from './pages/admin/AdminLogin.jsx';
+import RequireAdminAuth from './components/admin/RequireAdminAuth.jsx';
+import { AdminAuthProvider } from './lib/AdminAuthContext.jsx';
 import Dashboard from './pages/Dashboard.jsx';
 import Personal from './pages/Personal.jsx';
 import SitiosAsignacion from './pages/SitiosAsignacion.jsx';
@@ -42,10 +45,13 @@ import MisPagos from './pages/freelance/MisPagos.jsx';
 export default function App() {
   return (
     <BrowserRouter>
+      <AdminAuthProvider>
       <Routes>
         <Route path="/" element={<Navigate to="/admin/dashboard" replace />} />
 
-        <Route path="/admin" element={<AdminShell />}>
+        <Route path="/admin/login" element={<AdminLogin />} />
+
+        <Route path="/admin" element={<RequireAdminAuth><AdminShell /></RequireAdminAuth>}>
           <Route index element={<Navigate to="dashboard" replace />} />
           <Route path="dashboard" element={<Dashboard />} />
           <Route path="personal" element={<Personal />} />
@@ -89,6 +95,7 @@ export default function App() {
 
         <Route path="*" element={<Navigate to="/admin/dashboard" replace />} />
       </Routes>
+      </AdminAuthProvider>
     </BrowserRouter>
   );
 }

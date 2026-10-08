@@ -130,6 +130,12 @@ Al forzar con éxito: `"Registro agregado correctamente"`, estatus pasa a **"CON
 
 **Elegibilidad para ver el pedido en el portal freelance** (acumulado de varios escenarios): Puesto + Certeza + Vigencia de plaza + no estar en Lista Negra (por sitio) + **Sucursal del empleado = Sucursal del pedido** (hallazgo nuevo de Escenario 10 — un empleado de Querétaro no veía un pedido de CDMX hasta que se le cambió la sucursal).
 
+✅ **Implementado y probado en vivo end-to-end (Migraciones 012-015)**: las 5 condiciones de elegibilidad quedaron codificadas en `v_publicaciones_para_freelance` (puesto vía `tr_empleado_plaza.activo`, `certeza >= tc_puestos.porcentaje_minimo`, sucursal `te_empleados.sucursal_id = te_pedidos.sucursal_id`, exclusión por `te_lista_negra_empleados` con alcance de sitio+expiración). Probado con una cuenta real (login real del usuario vía Supabase Auth, no solo simulación SQL): ve la oportunidad elegible, se inscribe con clic real en "Inscribirme", la reservación aparece en "Mis eventos". Se encontraron y corrigieron 3 bugs reales en el camino:
+
+1. **Bug de privacidad (Migración 012)**: ni `v_publicaciones_para_freelance` ni `v_agenda_freelance` filtraban por el empleado que consulta (solo por tenant) — cualquier freelance autenticado podía ver la agenda/oportunidades de cualquier otro empleado del mismo tenant.
+2. **Bug de infraestructura (Migración 013)**: `current_user_id()`/`current_tenant_id()` leían el claim `sub` del JWT en el formato viejo `request.jwt.claim.sub` (GUC individual), que esta instancia de PostgREST ya no expone — solo expone el JSON agregado `request.jwt.claims`. Resultado: `mi_empleado_id()` siempre devolvía NULL para cualquier usuario autenticado real, aunque el login funcionara perfecto y RLS/vistas estuvieran bien. No era config de Supabase (se verificó JWT Signing Keys en el dashboard, están correctas) — era el código de la función. Se encontró creando una cuenta real de prueba y comparando `request.jwt.claims` (sí tenía el `sub`) contra `request.jwt.claim.sub` (NULL).
+3. **Bug de traslape falso (Migraciones 014-015)**: `inscribirme_a_publicacion()` en su rama de respaldo (pedido sin fecha en `te_pedido_fechas`) usaba `hora_inicio::interval` sobre una columna `time with time zone` (cast inválido en Postgres), y al corregir el cast se reveló un segundo problema: esa rama tomaba la fecha/hora del **pedido** (`te_pedidos.hora_inicio/hora_fin`, casi siempre NULL) en vez de la **línea** (`te_pedidos_detalle.fecha_cita/hora_cita_inicio/hora_cita_fin`, donde vive el horario real) — causando traslapes falsos entre líneas de pedidos distintos. Se agregó un tercer nivel de fallback correcto: `te_pedido_fechas` → `te_pedidos_detalle` (línea) → `te_pedidos` (encabezado, último recurso).
+
 ### Paso 4 — Cancelación
 Dos flags **independientes** confirmados en 4 escenarios distintos (1, 5, 13, 15):
 - **A nivel Pedido:** "Permitir cancelar confirmaciones" (SI/NO)
@@ -199,11 +205,11 @@ Fuentes de la sección 3: los 4 `SCREENSHOTS_CICLO_COMPLETO*.md`.
 
 | # | Corrección | Detalle | Prioridad |
 |---|---|---|---|
-| 1 | **Corregir `fase_evento_enum`** | De `('montaje','evento','desmontaje','otro')` a `('no_aplica','preparacion','montaje','show','desmontaje')` | Alta — confirmado en 2 escenarios independientes |
+| 1 | ~~Corregir `fase_evento_enum`~~ | ✅ **RESUELTO** (Migración 011) — `tc_fases_evento` ahora tiene los 5 valores reales: No aplica, Preparación, Montaje, Show, Desmontaje. El sistema 2017 (antecesor) tenía 8 valores con desglose Fase 1-4 por día de show; confirmado por el usuario que la simplificación a 5 en 2018 fue intencional — se replica tal cual, no se recupera el desglose. Ver `CONTEXTO_SISTEMA_ANTERIOR_SHAREPOINT.md` sección 4.2 | Alta — confirmado en 2 escenarios independientes |
 | 2 | **Agregar `id_sucursal` a `te_pedidos`** | Catálogo: CDMX, Guadalajara, Monterrey, Otra, Querétaro — campo real obligatorio que no capturamos | Alta |
 | 3 | **Agregar `fecha_final_cita` a `te_pedidos_detalle`** | Autocalculada (fecha_cita + horas_turno del puesto), hoy no existe el concepto | Alta |
 | 4 | **Revisar/corregir valores reales de `status` de pedido** | Vigente / Liberado / Cancelado / Procesado / Normal — no coincide con nuestro texto libre actual | Alta |
-| 5 | **`te_lista_negra_empleados` necesita alcance por sitio** | Hoy es global; el real es por "Lugar de evento" (+ checkbox "Todos") y tiene campo "Hasta" (expiración) que no existe | Alta |
+| 5 | ~~`te_lista_negra_empleados` necesita alcance por sitio~~ | ✅ **RESUELTO** (Migración 012) — se agregaron `sitio_id` (NULL = todos los sitios) y `fecha_expiracion` ("Hasta") | Alta |
 | 6 | **Crear tabla de tasas/rangos para certeza-reducción incremental** | Regla: no se puede reducir cantidad de golpe si implica cancelar reservaciones de certeza < 1 en más de X paso — formalizar como función/trigger | Media |
 | 7 | **Agregar `fase_evento_id` opcional a `tp_sueldos_matriciales`** | Evidencia de que la fase también afecta el sueldo matricial para ciertos puestos (ej. Runner) | Media |
 | 8 | **Agregar flag `es_evento_practica` a `te_pedidos_detalle`** | Para soportar el patrón "Evento Prueba" (pedido real reutilizado como sandbox de confirmación) | Media |
