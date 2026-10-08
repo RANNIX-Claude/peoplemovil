@@ -3624,3 +3624,740 @@ INSERT INTO tc_estados_mx (tenant_id, clave_ine, nombre) VALUES
   ('00000000-0000-0000-0000-000000000001', 'PUE', 'Puebla'),
   ('00000000-0000-0000-0000-000000000001', 'QRO', 'Querétaro')
 ON CONFLICT DO NOTHING;
+
+-- ============================================================================
+-- Migración 005 — Usuarios internos, Roles y Permisos (equivalente a GAM)
+-- ============================================================================
+-- Contexto: el sistema legado (Lobo/AppSCPF) usaba GAM (GeneXus Access Manager)
+-- con 5 roles reales -- Unknown, Administrador, Lobo, Operacion, Candidato -- y
+-- permisos granulares por pantalla+acción (Insert/Update/Delete/Execute/
+-- FullControl), confirmado en las capturas reales de gamwwroles.aspx y
+-- gamwwrolepermissions.aspx. Ver Dev/documentacion-referencia/MENU_Y_ROLES.md.
+--
+-- Decisión de diseño: el rol "Candidato" de GAM NO necesita fila en
+-- te_usuarios/tc_roles -- su alcance siempre es "solo sus propios datos", no
+-- permisos por módulo. Es gente del público general que se registra desde el
+-- sitio web para aplicar a una vacante publicada: alto volumen (haxta ~4000
+-- candidatos vigentes simultáneos para cubrir eventos), bajísima fricción, y
+-- la mayoría NUNCA avanza en el proceso (aplican y no vuelven a entrar). Por
+-- eso su acceso NO es una cuenta con password sino te_magic_links (tokens de
+-- un solo uso con propósito: completar_perfil/subir_docs/ver_postulacion),
+-- apuntando a te_candidatos -- ver migración 002. Solo cuando un candidato
+-- pasa inducción y es promovido (promover_candidato_a_empleado()) obtiene
+-- fila en te_empleados y AHÍ SÍ empieza a usar te_empleados.auth_user_id
+-- (login real con NIP, portal freelance) para agenda/checador/confirmaciones.
+-- te_usuarios/tc_roles cubre únicamente al personal INTERNO (Administrador,
+-- Lobo, Operación) que sí necesita permisos por módulo.
+-- El rol "Unknown" de GAM (default cuando no hay rol asignado) no se materializa
+-- como fila -- un usuario sin filas en tr_usuario_rol simplemente no tiene permisos.
+--
+-- Cambios:
+--   1. te_usuarios     -- cuenta interna ligada a auth.users de Supabase
+--   2. tc_roles        -- catálogo de roles por tenant (seed: Administrador, Lobo, Operación)
+--   3. tr_usuario_rol  -- asignación de roles a usuarios (N:N)
+--   4. tc_permisos     -- catálogo global de permisos granulares por módulo+acción
+--   5. tr_rol_permiso  -- asignación de permisos a roles (N:N)
+--   6. Función tiene_permiso(auth_uid, codigo_permiso)
+--   7. Nota sobre creado_por/modificado_por/actor_id/autorizado_por (sin FK duro)
+--   8. RLS + GRANTS
+--   9. Semillas: roles + catálogo de permisos + asignación por defecto
+-- ============================================================================
+
+-- ---------------------------------------------------------------------------
+-- 1. te_usuarios
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS te_usuarios (
+  id                     uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  tenant_id              uuid NOT NULL REFERENCES te_tenants(id) ON DELETE CASCADE,
+  auth_user_id           uuid NOT NULL UNIQUE,   -- FK lógica a auth.users.id de Supabase
+  nombre_usuario         text NOT NULL,
+  correo                 text NOT NULL,
+  nombre                 text,
+  apellido_paterno       text,
+  apellido_materno       text,
+  activo                 boolean NOT NULL DEFAULT true,
+  bloqueado              boolean NOT NULL DEFAULT false,
+  debe_cambiar_password  boolean NOT NULL DEFAULT false,
+  password_nunca_expira  boolean NOT NULL DEFAULT false,
+  ultimo_login_en        timestamptz,
+  creado_en timestamptz NOT NULL DEFAULT now(), creado_por uuid,
+  modificado_en timestamptz NOT NULL DEFAULT now(), modificado_por uuid,
+  UNIQUE (tenant_id, nombre_usuario)
+);
+CREATE INDEX IF NOT EXISTS ix_usuarios_tenant ON te_usuarios(tenant_id);
+DROP TRIGGER IF EXISTS tg_aud_usuarios ON te_usuarios;
+CREATE TRIGGER tg_aud_usuarios BEFORE INSERT OR UPDATE ON te_usuarios
+  FOR EACH ROW EXECUTE FUNCTION tg_auditoria();
+
+-- ---------------------------------------------------------------------------
+-- 2. tc_roles
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS tc_roles (
+  id          uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  tenant_id   uuid NOT NULL REFERENCES te_tenants(id) ON DELETE CASCADE,
+  codigo      text NOT NULL,                   -- slug estable, ej. 'administrador'
+  nombre      text NOT NULL,
+  descripcion text,
+  es_sistema  boolean NOT NULL DEFAULT false,   -- true = heredado del legado GAM, no se puede borrar
+  activo      boolean NOT NULL DEFAULT true,
+  creado_en timestamptz NOT NULL DEFAULT now(), creado_por uuid,
+  modificado_en timestamptz NOT NULL DEFAULT now(), modificado_por uuid,
+  UNIQUE (tenant_id, codigo)
+);
+CREATE INDEX IF NOT EXISTS ix_roles_tenant ON tc_roles(tenant_id);
+DROP TRIGGER IF EXISTS tg_aud_roles ON tc_roles;
+CREATE TRIGGER tg_aud_roles BEFORE INSERT OR UPDATE ON tc_roles
+  FOR EACH ROW EXECUTE FUNCTION tg_auditoria();
+
+-- ---------------------------------------------------------------------------
+-- 3. tr_usuario_rol
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS tr_usuario_rol (
+  tenant_id  uuid NOT NULL REFERENCES te_tenants(id) ON DELETE CASCADE,
+  usuario_id uuid NOT NULL REFERENCES te_usuarios(id) ON DELETE CASCADE,
+  rol_id     uuid NOT NULL REFERENCES tc_roles(id) ON DELETE CASCADE,
+  creado_en timestamptz NOT NULL DEFAULT now(), creado_por uuid,
+  PRIMARY KEY (usuario_id, rol_id)
+);
+CREATE INDEX IF NOT EXISTS ix_usuario_rol_tenant ON tr_usuario_rol(tenant_id);
+
+-- ---------------------------------------------------------------------------
+-- 4. tc_permisos (catálogo global de capacidades de la aplicación)
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS tc_permisos (
+  codigo      text PRIMARY KEY,     -- ej. 'pedidos.crear'
+  modulo      text NOT NULL,        -- ej. 'pedidos'
+  accion      text NOT NULL,        -- ver | crear | editar | eliminar | aprobar | exportar | administrar
+  descripcion text NOT NULL,
+  activo      boolean NOT NULL DEFAULT true
+);
+
+-- ---------------------------------------------------------------------------
+-- 5. tr_rol_permiso
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS tr_rol_permiso (
+  tenant_id      uuid NOT NULL REFERENCES te_tenants(id) ON DELETE CASCADE,
+  rol_id         uuid NOT NULL REFERENCES tc_roles(id) ON DELETE CASCADE,
+  permiso_codigo text NOT NULL REFERENCES tc_permisos(codigo) ON DELETE CASCADE,
+  creado_en timestamptz NOT NULL DEFAULT now(), creado_por uuid,
+  PRIMARY KEY (rol_id, permiso_codigo)
+);
+CREATE INDEX IF NOT EXISTS ix_rol_permiso_tenant ON tr_rol_permiso(tenant_id);
+
+-- ---------------------------------------------------------------------------
+-- 6. Función: tiene_permiso
+-- ---------------------------------------------------------------------------
+CREATE OR REPLACE FUNCTION tiene_permiso(p_auth_user_id uuid, p_codigo_permiso text)
+RETURNS boolean AS $$
+  SELECT EXISTS (
+    SELECT 1
+    FROM te_usuarios u
+    JOIN tr_usuario_rol ur ON ur.usuario_id = u.id
+    JOIN tr_rol_permiso rp ON rp.rol_id = ur.rol_id AND rp.permiso_codigo = p_codigo_permiso
+    WHERE u.auth_user_id = p_auth_user_id
+      AND u.activo AND NOT u.bloqueado
+  );
+$$ LANGUAGE sql STABLE;
+
+-- ---------------------------------------------------------------------------
+-- 7. Nota sobre creado_por/modificado_por/actor_id/autorizado_por
+-- ---------------------------------------------------------------------------
+-- Estas columnas (presentes en casi todas las tablas) NO llevan FK duro a
+-- propósito, igual que te_empleados.auth_user_id (ver migración 002): son una
+-- referencia lógica a auth.users.id de Supabase, que es la ÚNICA identidad
+-- universal del sistema.
+--
+-- Importante: auth.users.id puede corresponder a DOS poblaciones distintas
+-- según la tabla/contexto:
+--   (a) personal interno -> fila correspondiente en te_usuarios.auth_user_id
+--   (b) freelancer/candidato en el portal propio -> fila correspondiente en
+--       te_empleados.auth_user_id (ver tg_res_valida_cupo_y_plaza, que ya
+--       distingue auto-inscripción de personal vs. alta por staff interno)
+-- Un FK duro hacia una sola tabla rompería la otra población (ej. un
+-- freelancer autoinscribiéndose en te_reservaciones no tiene fila en
+-- te_usuarios). Si se requiere validar en el futuro, usar un trigger que
+-- verifique pertenencia a cualquiera de las dos tablas, no un FK simple.
+
+-- ---------------------------------------------------------------------------
+-- 8. RLS + GRANTS
+-- ---------------------------------------------------------------------------
+DO $$
+DECLARE t text;
+BEGIN
+  FOREACH t IN ARRAY ARRAY['te_usuarios','tc_roles','tr_usuario_rol','tr_rol_permiso'] LOOP
+    EXECUTE format('ALTER TABLE %I ENABLE ROW LEVEL SECURITY', t);
+    EXECUTE format('DROP POLICY IF EXISTS p_%1$s_sel ON %1$s', t);
+    EXECUTE format('DROP POLICY IF EXISTS p_%1$s_ins ON %1$s', t);
+    EXECUTE format('DROP POLICY IF EXISTS p_%1$s_upd ON %1$s', t);
+    EXECUTE format('DROP POLICY IF EXISTS p_%1$s_del ON %1$s', t);
+    EXECUTE format('CREATE POLICY p_%1$s_sel ON %1$s FOR SELECT USING (tenant_id = current_tenant_id());
+                     CREATE POLICY p_%1$s_ins ON %1$s FOR INSERT WITH CHECK (tenant_id = current_tenant_id());
+                     CREATE POLICY p_%1$s_upd ON %1$s FOR UPDATE USING (tenant_id = current_tenant_id());
+                     CREATE POLICY p_%1$s_del ON %1$s FOR DELETE USING (tenant_id = current_tenant_id());', t);
+  END LOOP;
+END $$;
+
+-- tc_permisos es catálogo global (sin tenant_id), igual que tc_planes_suscripcion: sin RLS, lectura abierta.
+GRANT ALL ON te_usuarios, tc_roles, tr_usuario_rol, tc_permisos, tr_rol_permiso
+  TO anon, authenticated, service_role;
+
+-- ---------------------------------------------------------------------------
+-- 9. Semillas: roles + catálogo de permisos + asignación por defecto
+-- ---------------------------------------------------------------------------
+SET LOCAL app.current_tenant = '00000000-0000-0000-0000-000000000001';
+
+INSERT INTO tc_roles (tenant_id, codigo, nombre, descripcion, es_sistema) VALUES
+  ('00000000-0000-0000-0000-000000000001', 'administrador', 'Administrador', 'Control total del sistema (heredado del rol GAM "Administrador")', true),
+  ('00000000-0000-0000-0000-000000000001', 'lobo',          'Lobo',          'Staff interno con acceso operativo amplio (heredado del rol GAM "Lobo")', true),
+  ('00000000-0000-0000-0000-000000000001', 'operacion',     'Operación',     'Gestión día a día: pedidos, asignación, checador (heredado del rol GAM "Operacion")', true)
+ON CONFLICT DO NOTHING;
+
+-- Catálogo de permisos por módulo+acción (ver, crear, editar, eliminar, aprobar, exportar, administrar)
+INSERT INTO tc_permisos (codigo, modulo, accion, descripcion) VALUES
+  ('candidatos.ver',       'candidatos',   'ver',        'Ver candidatos'),
+  ('candidatos.crear',     'candidatos',   'crear',      'Alta de candidatos'),
+  ('candidatos.editar',    'candidatos',   'editar',     'Editar candidatos'),
+  ('candidatos.eliminar',  'candidatos',   'eliminar',   'Eliminar candidatos'),
+  ('vacantes.ver',         'vacantes',     'ver',        'Ver vacantes y postulaciones'),
+  ('vacantes.crear',       'vacantes',     'crear',      'Publicar vacantes'),
+  ('vacantes.editar',      'vacantes',     'editar',     'Editar vacantes'),
+  ('vacantes.eliminar',    'vacantes',     'eliminar',   'Eliminar/cerrar vacantes'),
+  ('requisiciones.ver',    'requisiciones','ver',        'Ver requisiciones de personal'),
+  ('requisiciones.crear',  'requisiciones','crear',      'Crear requisiciones de personal'),
+  ('requisiciones.editar', 'requisiciones','editar',     'Editar requisiciones de personal'),
+  ('pedidos.ver',          'pedidos',      'ver',        'Ver pedidos'),
+  ('pedidos.crear',        'pedidos',      'crear',      'Crear pedidos'),
+  ('pedidos.editar',       'pedidos',      'editar',     'Editar pedidos'),
+  ('pedidos.eliminar',     'pedidos',      'eliminar',   'Cancelar pedidos'),
+  ('pedidos.aprobar',      'pedidos',      'aprobar',    'Liberar/aprobar pedidos'),
+  ('reservaciones.ver',    'reservaciones','ver',        'Ver reservaciones/asignación de personal'),
+  ('reservaciones.crear',  'reservaciones','crear',      'Preasignar/confirmar personal'),
+  ('reservaciones.eliminar','reservaciones','eliminar',  'Cancelar reservaciones'),
+  ('empleados.ver',        'empleados',    'ver',        'Ver empleados'),
+  ('empleados.crear',      'empleados',    'crear',      'Alta de empleados'),
+  ('empleados.editar',     'empleados',    'editar',     'Editar empleados'),
+  ('empleados.eliminar',   'empleados',    'eliminar',   'Baja de empleados'),
+  ('checador.ver',         'checador',     'ver',        'Ver registros de asistencia'),
+  ('checador.crear',       'checador',     'crear',      'Captura manual de asistencia'),
+  ('nomina.ver',           'nomina',       'ver',        'Ver nómina/honorarios'),
+  ('nomina.crear',         'nomina',       'crear',      'Capturar extras/precauciones de nómina'),
+  ('nomina.aprobar',       'nomina',       'aprobar',    'Calcular y cerrar periodo de nómina'),
+  ('facturacion.ver',      'facturacion',  'ver',        'Ver facturas'),
+  ('facturacion.crear',    'facturacion',  'crear',      'Generar facturas'),
+  ('facturacion.aprobar',  'facturacion',  'aprobar',    'Aprobar/timbrar facturas'),
+  ('catalogos.ver',        'catalogos',    'ver',        'Ver catálogos del sistema'),
+  ('catalogos.editar',     'catalogos',    'editar',     'Administrar catálogos del sistema'),
+  ('reportes.ver',         'reportes',     'ver',        'Ver reportes y tableros'),
+  ('reportes.exportar',    'reportes',     'exportar',   'Exportar reportes'),
+  ('usuarios.administrar', 'usuarios',     'administrar','Administrar usuarios, roles y permisos')
+ON CONFLICT DO NOTHING;
+
+-- Asignación por defecto: Administrador = todos los permisos
+INSERT INTO tr_rol_permiso (tenant_id, rol_id, permiso_codigo)
+SELECT '00000000-0000-0000-0000-000000000001', r.id, p.codigo
+FROM tc_roles r, tc_permisos p
+WHERE r.tenant_id = '00000000-0000-0000-0000-000000000001' AND r.codigo = 'administrador'
+ON CONFLICT DO NOTHING;
+
+-- Lobo: todo excepto administración de usuarios
+INSERT INTO tr_rol_permiso (tenant_id, rol_id, permiso_codigo)
+SELECT '00000000-0000-0000-0000-000000000001', r.id, p.codigo
+FROM tc_roles r, tc_permisos p
+WHERE r.tenant_id = '00000000-0000-0000-0000-000000000001' AND r.codigo = 'lobo'
+  AND p.codigo <> 'usuarios.administrar'
+ON CONFLICT DO NOTHING;
+
+-- Operación: módulos operativos del día a día, sin aprobar nómina/facturación ni administrar usuarios/catálogos
+INSERT INTO tr_rol_permiso (tenant_id, rol_id, permiso_codigo)
+SELECT '00000000-0000-0000-0000-000000000001', r.id, p.codigo
+FROM tc_roles r, tc_permisos p
+WHERE r.tenant_id = '00000000-0000-0000-0000-000000000001' AND r.codigo = 'operacion'
+  AND p.modulo IN ('candidatos','vacantes','requisiciones','pedidos','reservaciones','empleados','checador','reportes')
+  AND p.accion <> 'aprobar'
+ON CONFLICT DO NOTHING;
+-- Operación también puede consultar catálogos (solo lectura)
+INSERT INTO tr_rol_permiso (tenant_id, rol_id, permiso_codigo)
+SELECT '00000000-0000-0000-0000-000000000001', r.id, 'catalogos.ver'
+FROM tc_roles r WHERE r.tenant_id = '00000000-0000-0000-0000-000000000001' AND r.codigo = 'operacion'
+ON CONFLICT DO NOTHING;
+
+-- Nota: no se crea fila de ejemplo en te_usuarios/tr_usuario_rol porque requiere
+-- un auth_user_id real de Supabase Auth -- se crea desde la app cuando alguien
+-- se registra/es invitado, y el backend hace el INSERT en te_usuarios.
+
+-- ============================================================================
+-- Migración 006 — Campos reales confirmados contra Ocesa03_j_m.accdb (backend real)
+-- ============================================================================
+-- Fuente: Dev/freelance/Ocesa03_j_m.accdb, backend SQL Server real (datos
+-- anonimizados, estructura real) revisado por ODBC. Ver
+-- documentacion-referencia/HALLAZGOS_ACCDB_DATOS_REALES.md para el detalle.
+--
+-- Antes de escribir esto se recalculó el esquema EFECTIVO de te_pedidos,
+-- te_pedidos_detalle y te_nomina_detalle (CREATE TABLE + todos los ALTER TABLE
+-- posteriores en este mismo archivo) para no duplicar nada: la Migración de
+-- "Expandir te_pedidos/te_pedidos_detalle con los campos del Lobo" (sección
+-- más arriba) YA cubre casi todo lo que aparece en dbo_Pedidos / dbo_Pedidos
+-- Detalle del Access real. ANALISIS_BRECHAS_MANUALES_VS_MODELO.md quedó
+-- desactualizado en ese punto -- auditó solo el CREATE TABLE inicial, no los
+-- ALTER TABLE que ya lo resolvieron. Esta migración cierra lo que sí seguía
+-- faltando, confirmado campo por campo contra los datos reales:
+--
+--   1. te_pedidos: sociedad_pagadora_id (puede diferir de id_sociedad_propia,
+--      regla de negocio ya documentada), evento_id (catálogo Eventos/Shows que
+--      agrupa varios pedidos -- IdEvento/Titulo Evento en el Access real),
+--      lugar_cita_id (catálogo Lugar de Cita, distinto de tc_sitios),
+--      y FK real para contacto_id (existía la columna pero sin FK).
+--   2. te_pedidos_detalle: presentacion_id (tc_presentaciones_producto ya
+--      existía como catálogo pero nunca se conectó desde el detalle).
+--   3. te_nomina_detalle: desglose fiscal completo del recibo de honorarios
+--      (dbo_Pagos Honorarios real: IM/CF/SA/CG/ID/IT/IVA/RIVA/RISR) -- esto
+--      era el hallazgo "crítico" del análisis de brechas, ahora resuelto con
+--      los nombres y significados reales en vez de adivinados.
+-- ============================================================================
+
+-- ---------------------------------------------------------------------------
+-- 1. Catálogos nuevos: Eventos/Shows, Lugar de Cita, Contactos de cliente
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS tc_eventos (
+  id          uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  tenant_id   uuid NOT NULL REFERENCES te_tenants(id) ON DELETE CASCADE,
+  cliente_id  uuid REFERENCES tc_clientes(id),
+  titulo      text NOT NULL,
+  activo      boolean NOT NULL DEFAULT true,
+  creado_en timestamptz NOT NULL DEFAULT now(), creado_por uuid,
+  modificado_en timestamptz NOT NULL DEFAULT now(), modificado_por uuid
+);
+CREATE INDEX IF NOT EXISTS ix_eventos_tenant ON tc_eventos(tenant_id);
+DROP TRIGGER IF EXISTS tg_aud_eventos ON tc_eventos;
+CREATE TRIGGER tg_aud_eventos BEFORE INSERT OR UPDATE ON tc_eventos
+  FOR EACH ROW EXECUTE FUNCTION tg_auditoria();
+
+CREATE TABLE IF NOT EXISTS tc_lugares_cita (
+  id                    uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  tenant_id             uuid NOT NULL REFERENCES te_tenants(id) ON DELETE CASCADE,
+  titulo                text NOT NULL,
+  direccion             text,
+  direccion_abreviada   text,
+  telefonos             text,
+  activo                boolean NOT NULL DEFAULT true,
+  creado_en timestamptz NOT NULL DEFAULT now(), creado_por uuid,
+  modificado_en timestamptz NOT NULL DEFAULT now(), modificado_por uuid
+);
+CREATE INDEX IF NOT EXISTS ix_lugcita_tenant ON tc_lugares_cita(tenant_id);
+DROP TRIGGER IF EXISTS tg_aud_lugcita ON tc_lugares_cita;
+CREATE TRIGGER tg_aud_lugcita BEFORE INSERT OR UPDATE ON tc_lugares_cita
+  FOR EACH ROW EXECUTE FUNCTION tg_auditoria();
+
+CREATE TABLE IF NOT EXISTS tc_contactos_cliente (
+  id          uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  tenant_id   uuid NOT NULL REFERENCES te_tenants(id) ON DELETE CASCADE,
+  cliente_id  uuid REFERENCES tc_clientes(id) ON DELETE CASCADE,
+  nombre      text NOT NULL,
+  telefono    text,
+  correo      text,
+  puesto      text,
+  activo      boolean NOT NULL DEFAULT true,
+  creado_en timestamptz NOT NULL DEFAULT now(), creado_por uuid,
+  modificado_en timestamptz NOT NULL DEFAULT now(), modificado_por uuid
+);
+CREATE INDEX IF NOT EXISTS ix_contcli_tenant ON tc_contactos_cliente(tenant_id, cliente_id);
+DROP TRIGGER IF EXISTS tg_aud_contcli ON tc_contactos_cliente;
+CREATE TRIGGER tg_aud_contcli BEFORE INSERT OR UPDATE ON tc_contactos_cliente
+  FOR EACH ROW EXECUTE FUNCTION tg_auditoria();
+
+-- ---------------------------------------------------------------------------
+-- 2. te_pedidos: sociedad pagadora, evento, lugar de cita, FK real de contacto
+-- ---------------------------------------------------------------------------
+ALTER TABLE te_pedidos
+  ADD COLUMN IF NOT EXISTS sociedad_pagadora_id     uuid REFERENCES tc_sociedades_pagadoras(id),
+  ADD COLUMN IF NOT EXISTS evento_id                uuid REFERENCES tc_eventos(id),
+  ADD COLUMN IF NOT EXISTS lugar_cita_id             uuid REFERENCES tc_lugares_cita(id),
+  ADD COLUMN IF NOT EXISTS direccion_lugar_cita_snap text;
+
+-- contacto_id ya existía (migración anterior) pero sin FK -- se agrega ahora
+-- que existe la tabla destino. Guardado con IF NOT EXISTS vía catálogo de
+-- constraints porque Postgres no soporta "ADD CONSTRAINT IF NOT EXISTS".
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint WHERE conname = 'fk_pedidos_contacto_cliente'
+  ) THEN
+    ALTER TABLE te_pedidos
+      ADD CONSTRAINT fk_pedidos_contacto_cliente FOREIGN KEY (contacto_id) REFERENCES tc_contactos_cliente(id);
+  END IF;
+END $$;
+
+-- ---------------------------------------------------------------------------
+-- 3. te_pedidos_detalle: conectar con el catálogo de presentaciones de producto
+-- ---------------------------------------------------------------------------
+ALTER TABLE te_pedidos_detalle
+  ADD COLUMN IF NOT EXISTS presentacion_id uuid REFERENCES tc_presentaciones_producto(id);
+
+-- ---------------------------------------------------------------------------
+-- 4. te_nomina_detalle: desglose fiscal del recibo de honorarios (dbo_Pagos Honorarios real)
+-- ---------------------------------------------------------------------------
+ALTER TABLE te_nomina_detalle
+  ADD COLUMN IF NOT EXISTS impuesto_marginal      numeric(12,2) NOT NULL DEFAULT 0,  -- IM
+  ADD COLUMN IF NOT EXISTS cuota_fija             numeric(12,2) NOT NULL DEFAULT 0,  -- CF
+  ADD COLUMN IF NOT EXISTS subsidio_acreditable   numeric(12,2) NOT NULL DEFAULT 0,  -- SA
+  ADD COLUMN IF NOT EXISTS credito_general        numeric(12,2) NOT NULL DEFAULT 0,  -- CG
+  ADD COLUMN IF NOT EXISTS impuesto_diario        numeric(12,2) NOT NULL DEFAULT 0,  -- ID
+  ADD COLUMN IF NOT EXISTS impuesto_total         numeric(12,2) NOT NULL DEFAULT 0,  -- IT
+  ADD COLUMN IF NOT EXISTS iva                    numeric(12,2) NOT NULL DEFAULT 0,
+  ADD COLUMN IF NOT EXISTS retencion_iva          numeric(12,2) NOT NULL DEFAULT 0,  -- RIVA
+  ADD COLUMN IF NOT EXISTS retencion_isr          numeric(12,2) NOT NULL DEFAULT 0,  -- RISR
+  ADD COLUMN IF NOT EXISTS dias_laborados         int,
+  ADD COLUMN IF NOT EXISTS cumple_regla_cuenta_banco               boolean NOT NULL DEFAULT false,
+  ADD COLUMN IF NOT EXISTS cumple_regla_ultimo_pago_reciente       boolean NOT NULL DEFAULT false,
+  ADD COLUMN IF NOT EXISTS cumple_regla_recibe_pago_periodo_actual boolean NOT NULL DEFAULT false;
+
+-- ---------------------------------------------------------------------------
+-- 5. RLS + GRANTS para los catálogos nuevos
+-- ---------------------------------------------------------------------------
+DO $$
+DECLARE t text;
+BEGIN
+  FOREACH t IN ARRAY ARRAY['tc_eventos','tc_lugares_cita','tc_contactos_cliente'] LOOP
+    EXECUTE format('ALTER TABLE %I ENABLE ROW LEVEL SECURITY', t);
+    EXECUTE format('DROP POLICY IF EXISTS p_%1$s_sel ON %1$s', t);
+    EXECUTE format('DROP POLICY IF EXISTS p_%1$s_ins ON %1$s', t);
+    EXECUTE format('DROP POLICY IF EXISTS p_%1$s_upd ON %1$s', t);
+    EXECUTE format('DROP POLICY IF EXISTS p_%1$s_del ON %1$s', t);
+    EXECUTE format('CREATE POLICY p_%1$s_sel ON %1$s FOR SELECT USING (tenant_id = current_tenant_id());
+                     CREATE POLICY p_%1$s_ins ON %1$s FOR INSERT WITH CHECK (tenant_id = current_tenant_id());
+                     CREATE POLICY p_%1$s_upd ON %1$s FOR UPDATE USING (tenant_id = current_tenant_id());
+                     CREATE POLICY p_%1$s_del ON %1$s FOR DELETE USING (tenant_id = current_tenant_id());', t);
+  END LOOP;
+END $$;
+
+GRANT ALL ON tc_eventos, tc_lugares_cita, tc_contactos_cliente TO anon, authenticated, service_role;
+
+-- ---------------------------------------------------------------------------
+-- 6. Semillas: lugares de cita reales vistos en el Access (nombres/direcciones públicas, no son PII)
+-- ---------------------------------------------------------------------------
+SET LOCAL app.current_tenant = '00000000-0000-0000-0000-000000000001';
+
+INSERT INTO tc_lugares_cita (tenant_id, titulo, direccion, direccion_abreviada, telefonos) VALUES
+  ('00000000-0000-0000-0000-000000000001', 'Palacio de los Deportes', 'Río Churubusco Esquina con Añil, Colonia Granjas México', 'Río Churubusco Esquina con Añil Puerta 1', '237 99 99'),
+  ('00000000-0000-0000-0000-000000000001', 'Foro Sol', 'Viaducto río piedad, metro ciudad deportiva Acceso D de Foro Sol, Colonia Granjas México, Delegación Iztacalco', 'Viaducto río piedad, metro ciudad deportiva Acceso D', '764 84 46'),
+  ('00000000-0000-0000-0000-000000000001', 'Auditorio Nacional', 'Paseo de la reforma 50, Colonia Bosque de Chapultepéc, Delegación Miguel Hidalgo, Código Postal 11560', 'Paseo de la reforma 50, Colonia Bosque de Chapultepéc', '280 74 76')
+ON CONFLICT DO NOTHING;
+
+-- ============================================================================
+-- Migración 007 — Seguimiento de candidato + tasas fiscales de honorarios asimilables
+-- ============================================================================
+-- Cierra los dos gaps reales confirmados en la revisión manual de
+-- CRUCE_TABLAS_XPZ_VS_SCHEMA.md (sección 0) contra TC_SegMovCan/TE_SegCan y
+-- TP_ImpHonoAsim del XPZ real.
+--
+--   1. tc_tipos_movimiento_candidato + te_seguimiento_candidato -- bitácora de
+--      candidato (no existía ningún equivalente a te_movimientos_empleado
+--      pero para candidatos). Confirma lo que ya decía
+--      ANALISIS_BRECHAS_MANUALES_VS_MODELO.md.
+--   2. tp_tasas_honorarios_asimilables -- tabla de tasas/rangos fiscales
+--      (límite inferior/superior, cuota fija, % marginal, vigencia) que
+--      alimenta el cálculo de impuesto_marginal/cuota_fija/etc. agregados a
+--      te_nomina_detalle en la Migración 006. Sin esta tabla, esos campos se
+--      calcularían con constantes en código -- viola "cero parámetros de
+--      negocio hardcodeados".
+-- ============================================================================
+
+-- ---------------------------------------------------------------------------
+-- 1. Seguimiento de candidato
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS tc_tipos_movimiento_candidato (
+  id          uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  tenant_id   uuid NOT NULL REFERENCES te_tenants(id) ON DELETE CASCADE,
+  clave       text NOT NULL,
+  titulo      text NOT NULL,
+  activo      boolean NOT NULL DEFAULT true,
+  creado_en timestamptz NOT NULL DEFAULT now(), creado_por uuid,
+  modificado_en timestamptz NOT NULL DEFAULT now(), modificado_por uuid,
+  UNIQUE (tenant_id, clave)
+);
+DROP TRIGGER IF EXISTS tg_aud_tipomovcand ON tc_tipos_movimiento_candidato;
+CREATE TRIGGER tg_aud_tipomovcand BEFORE INSERT OR UPDATE ON tc_tipos_movimiento_candidato
+  FOR EACH ROW EXECUTE FUNCTION tg_auditoria();
+
+CREATE TABLE IF NOT EXISTS te_seguimiento_candidato (
+  id                   uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  tenant_id            uuid NOT NULL REFERENCES te_tenants(id) ON DELETE CASCADE,
+  candidato_id         uuid NOT NULL REFERENCES te_candidatos(id) ON DELETE CASCADE,
+  tipo_movimiento_id   uuid REFERENCES tc_tipos_movimiento_candidato(id),
+  fecha                timestamptz NOT NULL DEFAULT now(),
+  observaciones        text,
+  creado_en timestamptz NOT NULL DEFAULT now(), creado_por uuid,
+  modificado_en timestamptz NOT NULL DEFAULT now(), modificado_por uuid
+);
+CREATE INDEX IF NOT EXISTS ix_segcand_candidato ON te_seguimiento_candidato(tenant_id, candidato_id, fecha);
+DROP TRIGGER IF EXISTS tg_aud_segcand ON te_seguimiento_candidato;
+CREATE TRIGGER tg_aud_segcand BEFORE INSERT OR UPDATE ON te_seguimiento_candidato
+  FOR EACH ROW EXECUTE FUNCTION tg_auditoria();
+
+-- ---------------------------------------------------------------------------
+-- 2. Tasas fiscales de honorarios asimilables (alimenta te_nomina_detalle)
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS tp_tasas_honorarios_asimilables (
+  id                 uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  tenant_id          uuid NOT NULL REFERENCES te_tenants(id) ON DELETE CASCADE,
+  tipo               text NOT NULL DEFAULT 'ISR',
+  limite_inferior    numeric(14,2) NOT NULL,
+  limite_superior    numeric(14,2),
+  cuota_fija         numeric(12,2) NOT NULL DEFAULT 0,
+  tasa_porcentaje    numeric(7,4) NOT NULL DEFAULT 0,
+  vigente_desde      date NOT NULL,
+  vigente_hasta      date,
+  activo             boolean NOT NULL DEFAULT true,
+  creado_en timestamptz NOT NULL DEFAULT now(), creado_por uuid,
+  modificado_en timestamptz NOT NULL DEFAULT now(), modificado_por uuid,
+  CHECK (limite_superior IS NULL OR limite_superior > limite_inferior)
+);
+CREATE INDEX IF NOT EXISTS ix_tasashono_vigencia ON tp_tasas_honorarios_asimilables(tenant_id, vigente_desde, vigente_hasta);
+DROP TRIGGER IF EXISTS tg_aud_tasashono ON tp_tasas_honorarios_asimilables;
+CREATE TRIGGER tg_aud_tasashono BEFORE INSERT OR UPDATE ON tp_tasas_honorarios_asimilables
+  FOR EACH ROW EXECUTE FUNCTION tg_auditoria();
+
+-- ---------------------------------------------------------------------------
+-- 3. RLS + GRANTS
+-- ---------------------------------------------------------------------------
+DO $$
+DECLARE t text;
+BEGIN
+  FOREACH t IN ARRAY ARRAY['tc_tipos_movimiento_candidato','te_seguimiento_candidato','tp_tasas_honorarios_asimilables'] LOOP
+    EXECUTE format('ALTER TABLE %I ENABLE ROW LEVEL SECURITY', t);
+    EXECUTE format('DROP POLICY IF EXISTS p_%1$s_sel ON %1$s', t);
+    EXECUTE format('DROP POLICY IF EXISTS p_%1$s_ins ON %1$s', t);
+    EXECUTE format('DROP POLICY IF EXISTS p_%1$s_upd ON %1$s', t);
+    EXECUTE format('DROP POLICY IF EXISTS p_%1$s_del ON %1$s', t);
+    EXECUTE format('CREATE POLICY p_%1$s_sel ON %1$s FOR SELECT USING (tenant_id = current_tenant_id());
+                     CREATE POLICY p_%1$s_ins ON %1$s FOR INSERT WITH CHECK (tenant_id = current_tenant_id());
+                     CREATE POLICY p_%1$s_upd ON %1$s FOR UPDATE USING (tenant_id = current_tenant_id());
+                     CREATE POLICY p_%1$s_del ON %1$s FOR DELETE USING (tenant_id = current_tenant_id());', t);
+  END LOOP;
+END $$;
+
+GRANT ALL ON tc_tipos_movimiento_candidato, te_seguimiento_candidato, tp_tasas_honorarios_asimilables
+  TO anon, authenticated, service_role;
+
+-- ---------------------------------------------------------------------------
+-- 4. Semillas
+-- ---------------------------------------------------------------------------
+SET LOCAL app.current_tenant = '00000000-0000-0000-0000-000000000001';
+
+INSERT INTO tc_tipos_movimiento_candidato (tenant_id, clave, titulo) VALUES
+  ('00000000-0000-0000-0000-000000000001', 'registrado',        'Registrado'),
+  ('00000000-0000-0000-0000-000000000001', 'citado_entrevista', 'Citado a entrevista'),
+  ('00000000-0000-0000-0000-000000000001', 'curso_induccion',   'Citado a curso de inducción'),
+  ('00000000-0000-0000-0000-000000000001', 'evento_prueba',     'Citado a evento de prueba'),
+  ('00000000-0000-0000-0000-000000000001', 'aceptado',          'Aceptado'),
+  ('00000000-0000-0000-0000-000000000001', 'rechazado',         'Rechazado'),
+  ('00000000-0000-0000-0000-000000000001', 'promovido_empleado','Promovido a empleado')
+ON CONFLICT DO NOTHING;
+
+-- Tasas ISR honorarios asimilables (tabla mensual vigente, valores de referencia -- ajustar con el usuario)
+INSERT INTO tp_tasas_honorarios_asimilables (tenant_id, tipo, limite_inferior, limite_superior, cuota_fija, tasa_porcentaje, vigente_desde) VALUES
+  ('00000000-0000-0000-0000-000000000001', 'ISR', 0.01,      746.04,    0.00,   1.92,  '2026-01-01'),
+  ('00000000-0000-0000-0000-000000000001', 'ISR', 746.05,    6332.05,   14.32,  6.40,  '2026-01-01'),
+  ('00000000-0000-0000-0000-000000000001', 'ISR', 6332.06,   11128.01,  371.83, 10.88, '2026-01-01'),
+  ('00000000-0000-0000-0000-000000000001', 'ISR', 11128.02,  12935.82,  893.63, 16.00, '2026-01-01'),
+  ('00000000-0000-0000-0000-000000000001', 'ISR', 12935.83,  15487.71,  1182.88,17.92, '2026-01-01'),
+  ('00000000-0000-0000-0000-000000000001', 'ISR', 15487.72,  31236.49,  1640.18,21.36, '2026-01-01'),
+  ('00000000-0000-0000-0000-000000000001', 'ISR', 31236.50,  49233.00,  5004.12,23.52, '2026-01-01'),
+  ('00000000-0000-0000-0000-000000000001', 'ISR', 49233.01,  93993.90,  9236.89,30.00, '2026-01-01'),
+  ('00000000-0000-0000-0000-000000000001', 'ISR', 93993.91,  125325.20, 22665.17,32.00,'2026-01-01'),
+  ('00000000-0000-0000-0000-000000000001', 'ISR', 125325.21, 375975.61, 32691.18,34.00,'2026-01-01'),
+  ('00000000-0000-0000-0000-000000000001', 'ISR', 375975.62, NULL,      117912.32,35.00,'2026-01-01')
+ON CONFLICT DO NOTHING;
+
+-- ============================================================================
+-- Migración 008 — Reconciliación te_pedidos/te_pedidos_detalle contra SQL Server real
+-- ============================================================================
+-- Fuente: conexión directa al SQL Server real (sql5063.site4now.net,
+-- db_a81e28_appscpfv2) -- se comparó columna por columna TE_Pedido (40 cols)
+-- y TE_Peddet (67 cols), las tablas TRANSACCIONALES reales (con FKs
+-- declarados en el motor), contra nuestro te_pedidos/te_pedidos_detalle.
+--
+-- Nota importante descubierta en este cruce: `Pedidos`/`Pedidos2`/`Pedidos22`
+-- (que coinciden con dbo_Pedidos del Access y con lo que veníamos usando como
+-- referencia) NO son la tabla transaccional real -- son una tabla plana sin
+-- ningún FK declarado, casi seguro una tabla de reporte/exportación. La
+-- fuente de verdad real es TE_Pedido + TE_Peddet (coincide con las URLs
+-- reales vistas en capturas: te_pedidoww.aspx, wp_pedidodetalle.aspx).
+--
+-- Columnas agregadas abajo, solo las confirmadas como gap real (hay más
+-- columnas en el SQL Server real que son snapshots denormalizados --
+-- Titulo_Sucursal, Titulo_Sociedad, etc. -- esas se resuelven con JOIN, no
+-- se replican). Varias de estas columnas YA habían sido detectadas de forma
+-- independiente por el análisis visual de capturas (ver RADIOGRAFIA_FUNCIONAL_
+-- PANTALLAS.md) -- confirmación cruzada entre dos fuentes distintas.
+-- ============================================================================
+
+-- ---------------------------------------------------------------------------
+-- 1. Catálogo nuevo: Sucursales (organizacional -- CDMX/Guadalajara/Monterrey/
+--    Querétaro/Otra -- distinto de tc_sitios, que es el inmueble físico)
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS tc_sucursales (
+  id          uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  tenant_id   uuid NOT NULL REFERENCES te_tenants(id) ON DELETE CASCADE,
+  titulo      text NOT NULL,
+  activo      boolean NOT NULL DEFAULT true,
+  creado_en timestamptz NOT NULL DEFAULT now(), creado_por uuid,
+  modificado_en timestamptz NOT NULL DEFAULT now(), modificado_por uuid,
+  UNIQUE (tenant_id, titulo)
+);
+DROP TRIGGER IF EXISTS tg_aud_sucursales ON tc_sucursales;
+CREATE TRIGGER tg_aud_sucursales BEFORE INSERT OR UPDATE ON tc_sucursales
+  FOR EACH ROW EXECUTE FUNCTION tg_auditoria();
+
+-- Catálogo de referencia de estatus real de pedido (TC_EstatusAut en SQL
+-- Server) -- se agrega como catálogo documental + columna nueva en paralelo;
+-- NO se reemplaza `te_pedidos.status` (texto libre) porque ya hay lógica de
+-- aplicación (React, funciones) que depende de sus valores actuales
+-- ('borrador','liberado','procesado','cancelado'). Decisión pendiente del
+-- equipo: migrar status -> estatus_id en una fase posterior.
+CREATE TABLE IF NOT EXISTS tc_estatus_pedido (
+  id          uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  tenant_id   uuid NOT NULL REFERENCES te_tenants(id) ON DELETE CASCADE,
+  clave       text NOT NULL,
+  titulo      text NOT NULL,
+  activo      boolean NOT NULL DEFAULT true,
+  creado_en timestamptz NOT NULL DEFAULT now(), creado_por uuid,
+  modificado_en timestamptz NOT NULL DEFAULT now(), modificado_por uuid,
+  UNIQUE (tenant_id, clave)
+);
+DROP TRIGGER IF EXISTS tg_aud_estpedido ON tc_estatus_pedido;
+CREATE TRIGGER tg_aud_estpedido BEFORE INSERT OR UPDATE ON tc_estatus_pedido
+  FOR EACH ROW EXECUTE FUNCTION tg_auditoria();
+
+-- ---------------------------------------------------------------------------
+-- 2. te_pedidos: columnas confirmadas por TC_SucursalID/TC_SucursalPagId/
+--    TE_PedidoLugOtro(Dire)/TC_EstatusAutID del SQL Server real
+-- ---------------------------------------------------------------------------
+ALTER TABLE te_pedidos
+  ADD COLUMN IF NOT EXISTS sucursal_id            uuid REFERENCES tc_sucursales(id),
+  ADD COLUMN IF NOT EXISTS sucursal_pagadora_id    uuid REFERENCES tc_sucursales(id),
+  ADD COLUMN IF NOT EXISTS estatus_id              uuid REFERENCES tc_estatus_pedido(id),
+  ADD COLUMN IF NOT EXISTS lugar_otro              boolean NOT NULL DEFAULT false,
+  ADD COLUMN IF NOT EXISTS lugar_otro_direccion    text;
+
+-- ---------------------------------------------------------------------------
+-- 3. te_pedidos_detalle: columnas confirmadas por TE_pedDetTitu/ST_LugarId/
+--    TE_pedDetOtro(Des)/TC_FaseEventoID/TE_PeddetFechafinal.../
+--    TE_PeddetFechafincitaoculta/TE_PeddetCompleto(ConPreasigna)/
+--    TE_pedDetBloque del SQL Server real
+-- ---------------------------------------------------------------------------
+ALTER TABLE te_pedidos_detalle
+  ADD COLUMN IF NOT EXISTS titulo                  text,
+  ADD COLUMN IF NOT EXISTS lugar_cita_id            uuid REFERENCES tc_lugares_cita(id),
+  ADD COLUMN IF NOT EXISTS lugar_otro               boolean NOT NULL DEFAULT false,
+  ADD COLUMN IF NOT EXISTS lugar_otro_descripcion   text,
+  ADD COLUMN IF NOT EXISTS fase_evento_id           uuid REFERENCES tc_fases_evento(id),
+  ADD COLUMN IF NOT EXISTS fecha_final_cita         timestamptz,
+  ADD COLUMN IF NOT EXISTS fecha_fin_cita_oculta    timestamptz,
+  ADD COLUMN IF NOT EXISTS completo                 boolean NOT NULL DEFAULT false,
+  ADD COLUMN IF NOT EXISTS completo_con_preasignados boolean NOT NULL DEFAULT false,
+  ADD COLUMN IF NOT EXISTS bloque                   boolean NOT NULL DEFAULT false;
+
+-- Mantener completo/completo_con_preasignados sincronizados con los
+-- porcentajes ya calculados por recalcular_cobertura_detalle()
+CREATE OR REPLACE FUNCTION tg_sync_detalle_completo() RETURNS trigger AS $$
+BEGIN
+  NEW.completo := NEW.porcentaje_completo >= 100;
+  NEW.completo_con_preasignados := NEW.porcentaje_completo_con_pre >= 100;
+  RETURN NEW;
+END $$ LANGUAGE plpgsql;
+DROP TRIGGER IF EXISTS tg_detalle_completo_sync ON te_pedidos_detalle;
+CREATE TRIGGER tg_detalle_completo_sync BEFORE INSERT OR UPDATE ON te_pedidos_detalle
+  FOR EACH ROW EXECUTE FUNCTION tg_sync_detalle_completo();
+
+-- ---------------------------------------------------------------------------
+-- 4. RLS + GRANTS para los catálogos nuevos
+-- ---------------------------------------------------------------------------
+DO $$
+DECLARE t text;
+BEGIN
+  FOREACH t IN ARRAY ARRAY['tc_sucursales','tc_estatus_pedido'] LOOP
+    EXECUTE format('ALTER TABLE %I ENABLE ROW LEVEL SECURITY', t);
+    EXECUTE format('DROP POLICY IF EXISTS p_%1$s_sel ON %1$s', t);
+    EXECUTE format('DROP POLICY IF EXISTS p_%1$s_ins ON %1$s', t);
+    EXECUTE format('DROP POLICY IF EXISTS p_%1$s_upd ON %1$s', t);
+    EXECUTE format('DROP POLICY IF EXISTS p_%1$s_del ON %1$s', t);
+    EXECUTE format('CREATE POLICY p_%1$s_sel ON %1$s FOR SELECT USING (tenant_id = current_tenant_id());
+                     CREATE POLICY p_%1$s_ins ON %1$s FOR INSERT WITH CHECK (tenant_id = current_tenant_id());
+                     CREATE POLICY p_%1$s_upd ON %1$s FOR UPDATE USING (tenant_id = current_tenant_id());
+                     CREATE POLICY p_%1$s_del ON %1$s FOR DELETE USING (tenant_id = current_tenant_id());', t);
+  END LOOP;
+END $$;
+
+GRANT ALL ON tc_sucursales, tc_estatus_pedido TO anon, authenticated, service_role;
+
+-- ---------------------------------------------------------------------------
+-- 5. Semillas: sucursales y estatus de pedido reales (confirmados por capturas Y por el SQL Server real)
+-- ---------------------------------------------------------------------------
+SET LOCAL app.current_tenant = '00000000-0000-0000-0000-000000000001';
+
+INSERT INTO tc_sucursales (tenant_id, titulo) VALUES
+  ('00000000-0000-0000-0000-000000000001', 'CDMX'),
+  ('00000000-0000-0000-0000-000000000001', 'Guadalajara'),
+  ('00000000-0000-0000-0000-000000000001', 'Monterrey'),
+  ('00000000-0000-0000-0000-000000000001', 'Querétaro'),
+  ('00000000-0000-0000-0000-000000000001', 'Otra')
+ON CONFLICT DO NOTHING;
+
+INSERT INTO tc_estatus_pedido (tenant_id, clave, titulo) VALUES
+  ('00000000-0000-0000-0000-000000000001', 'vigente',   'Vigente'),
+  ('00000000-0000-0000-0000-000000000001', 'liberado',  'Liberado'),
+  ('00000000-0000-0000-0000-000000000001', 'cancelado', 'Cancelado'),
+  ('00000000-0000-0000-0000-000000000001', 'procesado', 'Procesado'),
+  ('00000000-0000-0000-0000-000000000001', 'normal',    'Normal')
+ON CONFLICT DO NOTHING;
+
+-- ============================================================================
+-- Migración 009 — Función para la Matriz de Puestos (pivote fecha × bloque/producto)
+-- ============================================================================
+-- Contexto: TE_Puente (SQL Server real) resultó ser una tabla pivote
+-- hardcodeada de GeneXus -- 50 pares columna/valor (TE_PuenteC1..C50 +
+-- TE_PuenteNp1..Np50) por Bloque+Producto+Pedido, usada para renderizar la
+-- "Matriz de Puestos" que confirmaron varios agentes de capturas (fechas
+-- como columnas, Bloque+Producto como filas, celda = "Cantidad - T Turnos").
+-- Toda esa información ya existe en te_pedidos_detalle (una fila por fecha);
+-- no hace falta replicar TE_Puente -- lo que falta es la función que arma
+-- el pivote en formato "largo" para que el frontend lo pivotee a columnas
+-- dinámicas (no se intenta pivotear dentro de SQL porque el número de
+-- fechas/columnas varía por pedido -- eso se resuelve mejor en JS).
+-- ============================================================================
+
+CREATE OR REPLACE FUNCTION matriz_puestos_pedido(p_pedido_id uuid)
+RETURNS TABLE (
+  pedido_detalle_id          uuid,
+  bloque_num                 int,
+  producto_id                uuid,
+  producto_titulo            text,
+  puesto_id                  uuid,
+  puesto_titulo               text,
+  fecha_cita                 date,
+  hora_cita_inicio            time,
+  hora_cita_fin               time,
+  cantidad                    int,
+  turnos                      numeric,
+  cantidad_reservados_real    int,
+  cantidad_reservados_con_pre int,
+  porcentaje_completo         numeric,
+  status_detalle               estado_detalle_pedido_enum,
+  costo_unit                   numeric,
+  precio                       numeric
+) AS $$
+  SELECT
+    d.id, d.bloque_num, d.producto_id, p.titulo, d.puesto_id, pu.titulo,
+    d.fecha_cita, d.hora_cita_inicio, d.hora_cita_fin,
+    d.cantidad, d.turnos, d.cantidad_reservados_real, d.cantidad_reservados_con_pre,
+    d.porcentaje_completo, d.status_detalle, d.costo_unit, d.precio
+  FROM te_pedidos_detalle d
+  LEFT JOIN tc_productos p ON p.id = d.producto_id
+  LEFT JOIN tc_puestos pu ON pu.id = d.puesto_id
+  WHERE d.pedido_id = p_pedido_id
+  ORDER BY d.bloque_num NULLS LAST, p.titulo NULLS LAST, d.fecha_cita, d.hora_cita_inicio;
+$$ LANGUAGE sql STABLE;
+
+COMMENT ON FUNCTION matriz_puestos_pedido IS
+  'Formato largo (una fila por fecha/detalle) para que el frontend arme la Matriz de Puestos como tabla pivote (fechas como columnas, Bloque+Producto como filas) -- equivalente funcional a TE_Puente del sistema legado, sin su límite fijo de 50 columnas.';
