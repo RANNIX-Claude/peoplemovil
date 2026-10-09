@@ -5879,3 +5879,299 @@ BEGIN
   END LOOP;
   RETURN n;
 END $$ LANGUAGE plpgsql;
+
+-- ============================================================================
+-- Migración 023 -- Confirmar/Cancelar reservación desde el portal freelance
+-- (pantalla "Mis eventos", equivalente a "Eventos Por Confirmar" / "Eventos
+-- Confirmados" de Sistema Integra legado -- ver captura analizada 2026-10-09).
+-- Hasta ahora v_agenda_freelance era de solo lectura: no existía ningún RPC
+-- para que el propio freelance confirmara un "preasignado" o cancelara su
+-- participación -- la única vía de escritura era inscribirme_a_publicacion().
+-- Aplicada a la base real vía apply_migration.
+-- ============================================================================
+
+-- 1. v_agenda_freelance: agrega el detalle completo que pide la pantalla
+--    (lugar de cita, dirección, indicaciones, turnos, folio, y si el pedido
+--    permite cancelar confirmaciones -- te_pedidos_detalle.permitir_cancelar_
+--    confirmaciones, columna que ya existía pero nada freelance-facing la leía).
+--    DROP+CREATE (no CREATE OR REPLACE) porque se reordenan columnas.
+DROP VIEW IF EXISTS v_agenda_freelance;
+CREATE VIEW v_agenda_freelance AS
+SELECT
+  r.id, r.empleado_id, r.pedido_id, r.pedido_detalle_id, r.puesto_id,
+  r.estado, r.estado_asistencia, r.cita_inicio, r.cita_fin, r.duracion_en_turnos,
+  p.folio AS pedido_folio, p.titulo AS pedido_titulo,
+  s.titulo AS sitio, pu.titulo AS puesto, r.tenant_id,
+  CASE WHEN pd.lugar_otro THEN pd.lugar_otro_descripcion ELSE lc.titulo END AS lugar_cita,
+  COALESCE(
+    CASE WHEN pd.lugar_otro THEN NULL ELSE lc.direccion END,
+    s.direccion
+  ) AS direccion_cita,
+  pd.indicaciones_especiales,
+  COALESCE(pd.permitir_cancelar_confirmaciones, true) AS permitir_cancelar_confirmaciones
+FROM te_reservaciones r
+JOIN te_pedidos p ON p.id = r.pedido_id
+LEFT JOIN tc_sitios s ON s.id = r.sitio_id
+LEFT JOIN tc_puestos pu ON pu.id = r.puesto_id
+LEFT JOIN te_pedidos_detalle pd ON pd.id = r.pedido_detalle_id
+LEFT JOIN tc_lugares_cita lc ON lc.id = pd.lugar_cita_id
+WHERE r.empleado_id = mi_empleado_id();
+
+GRANT SELECT ON v_agenda_freelance TO anon, authenticated;
+
+-- 2. confirmar_mi_reservacion -- pasa una reservación "preasignado" (la armó
+--    el admin en Preasignación, o quedó así por el motor de asignación) a
+--    "confirmado_voluntario". Solo el dueño de la reservación puede llamarla.
+CREATE OR REPLACE FUNCTION confirmar_mi_reservacion(p_reservacion uuid)
+RETURNS void AS $$
+DECLARE r te_reservaciones; emp uuid;
+BEGIN
+  emp := mi_empleado_id();
+  IF emp IS NULL THEN RAISE EXCEPTION 'Sesión sin empleado ligado.'; END IF;
+  SELECT * INTO r FROM te_reservaciones WHERE id = p_reservacion AND tenant_id = current_tenant_id();
+  IF r.id IS NULL THEN RAISE EXCEPTION 'Reservación no existe.'; END IF;
+  IF r.empleado_id <> emp THEN RAISE EXCEPTION 'Esta reservación no te pertenece.'; END IF;
+  IF r.estado <> 'preasignado' THEN
+    RAISE EXCEPTION 'Solo se puede confirmar una reservación preasignada (estado actual: %).', r.estado;
+  END IF;
+
+  UPDATE te_reservaciones
+    SET estado = 'confirmado_voluntario', modificado_en = now(), modificado_por = current_user_id()
+    WHERE id = p_reservacion;
+
+  INSERT INTO te_reservacion_bitacora (tenant_id, reservacion_id, actor_user_id, accion, estado_antes, estado_despues, regla_aplicada)
+    VALUES (r.tenant_id, r.id, current_user_id(), 'confirmar', r.estado, 'confirmado_voluntario', 'ConfirmacionFreelancePortal');
+END $$ LANGUAGE plpgsql SECURITY DEFINER;
+GRANT EXECUTE ON FUNCTION confirmar_mi_reservacion(uuid) TO authenticated;
+
+-- 3. cancelar_mi_reservacion -- el freelance desiste de un "preasignado" (sin
+--    restricción, nunca llegó a confirmar nada) o cancela algo que ya había
+--    confirmado (bloqueado si el pedido_detalle tiene
+--    permitir_cancelar_confirmaciones = false). NO aplica penalización ni
+--    reglas de "horas antes de cancelar" todavía -- ver nota de pendiente en
+--    CLAUDE.md §11: el propio diseño original (captura "Sistema Integra")
+--    deja abierto si debe haber penalización y lista de espera; no se inventa
+--    aquí, queda como deuda técnica documentada.
+CREATE OR REPLACE FUNCTION cancelar_mi_reservacion(p_reservacion uuid)
+RETURNS void AS $$
+DECLARE r te_reservaciones; emp uuid; permitido boolean;
+BEGIN
+  emp := mi_empleado_id();
+  IF emp IS NULL THEN RAISE EXCEPTION 'Sesión sin empleado ligado.'; END IF;
+  SELECT * INTO r FROM te_reservaciones WHERE id = p_reservacion AND tenant_id = current_tenant_id();
+  IF r.id IS NULL THEN RAISE EXCEPTION 'Reservación no existe.'; END IF;
+  IF r.empleado_id <> emp THEN RAISE EXCEPTION 'Esta reservación no te pertenece.'; END IF;
+  IF r.estado NOT IN ('preasignado','confirmado_voluntario','confirmado_opcional') THEN
+    RAISE EXCEPTION 'Esta reservación ya no se puede cancelar (estado actual: %).', r.estado;
+  END IF;
+
+  IF r.estado IN ('confirmado_voluntario','confirmado_opcional') THEN
+    SELECT COALESCE(pd.permitir_cancelar_confirmaciones, true) INTO permitido
+      FROM te_pedidos_detalle pd WHERE pd.id = r.pedido_detalle_id;
+    IF NOT COALESCE(permitido, true) THEN
+      RAISE EXCEPTION 'Este evento ya no permite cancelar confirmaciones.';
+    END IF;
+  END IF;
+
+  UPDATE te_reservaciones
+    SET estado = 'cancelado', regla_aplicada = 'CancelacionVoluntariaFreelance',
+        modificado_en = now(), modificado_por = current_user_id()
+    WHERE id = p_reservacion;
+
+  INSERT INTO te_reservacion_bitacora (tenant_id, reservacion_id, actor_user_id, accion, estado_antes, estado_despues, regla_aplicada)
+    VALUES (r.tenant_id, r.id, current_user_id(), 'cancelar', r.estado, 'cancelado', 'CancelacionVoluntariaFreelance');
+END $$ LANGUAGE plpgsql SECURITY DEFINER;
+GRANT EXECUTE ON FUNCTION cancelar_mi_reservacion(uuid) TO authenticated;
+
+-- ============================================================================
+-- Migración 024 — Vacaciones, Capacitación, Evaluaciones y Beneficios
+-- (2026-10-09, pedido explícito del usuario tras revisar el expediente de
+-- empleado de IRP/RANNIX): el legado OCESA (Lobo) NO tenía estos módulos —
+-- "o cesa no les daba vacaciones" — pero el propio usuario pidió agregarlos
+-- de cualquier forma porque el proyecto debe alinearse a las reformas
+-- laborales mexicanas recientes (régimen de vacaciones dignas, LFT Art. 76
+-- reformado en diciembre 2022 / vigente 2023). A diferencia del resto del
+-- esquema, esto NO viene del legado — es una decisión deliberada documentada
+-- aquí y en CLAUDE.md D14, no una invención silenciosa.
+-- ============================================================================
+
+-- ---------------------------------------------------------------------------
+-- 1. Vacaciones — función de días por ley (LFT Art. 76, reforma vigente 2023)
+--    1°=12, 2°=14, 3°=16, 4°=18, 5°-9°=20, y +2 días cada 5 años a partir del
+--    año 10 (10°-14°=22, 15°-19°=24, 20°-24°=26, 25°-29°=28, 30°+=30, ...).
+--    El "año laboral" en sí NO se guarda — se deriva de te_empleados.fecha_alta
+--    en el cliente (evita duplicar un dato derivable); solo se persisten los
+--    períodos efectivamente tomados.
+-- ---------------------------------------------------------------------------
+CREATE OR REPLACE FUNCTION dias_vacaciones_lft(p_anio_laboral int)
+RETURNS numeric AS $$
+BEGIN
+  IF p_anio_laboral IS NULL OR p_anio_laboral <= 0 THEN RETURN 0;
+  ELSIF p_anio_laboral = 1 THEN RETURN 12;
+  ELSIF p_anio_laboral = 2 THEN RETURN 14;
+  ELSIF p_anio_laboral = 3 THEN RETURN 16;
+  ELSIF p_anio_laboral = 4 THEN RETURN 18;
+  ELSIF p_anio_laboral BETWEEN 5 AND 9 THEN RETURN 20;
+  ELSE RETURN 20 + 2 * CEIL((p_anio_laboral - 9)::numeric / 5);
+  END IF;
+END $$ LANGUAGE plpgsql IMMUTABLE;
+
+CREATE TABLE IF NOT EXISTS te_vacaciones_periodos (
+  id                uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  tenant_id         uuid NOT NULL REFERENCES te_tenants(id) ON DELETE CASCADE,
+  empleado_id       uuid NOT NULL REFERENCES te_empleados(id) ON DELETE CASCADE,
+  anio_laboral      int NOT NULL CHECK (anio_laboral > 0),
+  fecha_inicio      date NOT NULL,
+  fecha_fin         date NOT NULL,
+  dias              numeric(5,2) NOT NULL CHECK (dias > 0),
+  prima_vacacional  numeric(12,2) NOT NULL DEFAULT 0,   -- LFT Art. 80: mínimo 25% del salario de esos días
+  autorizado_por    uuid REFERENCES te_usuarios(id),
+  estado            text NOT NULL DEFAULT 'tomada' CHECK (estado IN ('tomada','autorizada','cancelada')),
+  observaciones     text,
+  creado_en timestamptz NOT NULL DEFAULT now(), creado_por uuid,
+  modificado_en timestamptz NOT NULL DEFAULT now(), modificado_por uuid,
+  CHECK (fecha_fin >= fecha_inicio)
+);
+CREATE INDEX IF NOT EXISTS ix_vacper_emp ON te_vacaciones_periodos(tenant_id, empleado_id, anio_laboral);
+DROP TRIGGER IF EXISTS tg_aud_vacper ON te_vacaciones_periodos;
+CREATE TRIGGER tg_aud_vacper BEFORE INSERT OR UPDATE ON te_vacaciones_periodos FOR EACH ROW EXECUTE FUNCTION tg_auditoria();
+
+-- ---------------------------------------------------------------------------
+-- 2. Capacitación — distinta del curso de inducción pre-contratación
+--    (te_cursos_induccion/tr_asistencia_curso, ligado a candidato_id): esta
+--    es capacitación continua del empleado YA activo.
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS te_capacitaciones_empleado (
+  id                uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  tenant_id         uuid NOT NULL REFERENCES te_tenants(id) ON DELETE CASCADE,
+  empleado_id       uuid NOT NULL REFERENCES te_empleados(id) ON DELETE CASCADE,
+  titulo            text NOT NULL,
+  institucion       text,
+  tipo              text NOT NULL DEFAULT 'interna' CHECK (tipo IN ('interna','externa','certificacion')),
+  horas             numeric(6,1),
+  fecha_inicio      date NOT NULL DEFAULT CURRENT_DATE,
+  fecha_fin         date,
+  vigencia_hasta    date,
+  constancia_url    text,
+  observaciones     text,
+  creado_en timestamptz NOT NULL DEFAULT now(), creado_por uuid,
+  modificado_en timestamptz NOT NULL DEFAULT now(), modificado_por uuid
+);
+CREATE INDEX IF NOT EXISTS ix_capemp_emp ON te_capacitaciones_empleado(tenant_id, empleado_id);
+DROP TRIGGER IF EXISTS tg_aud_capemp ON te_capacitaciones_empleado;
+CREATE TRIGGER tg_aud_capemp BEFORE INSERT OR UPDATE ON te_capacitaciones_empleado FOR EACH ROW EXECUTE FUNCTION tg_auditoria();
+
+-- ---------------------------------------------------------------------------
+-- 3. Evaluaciones de desempeño
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS te_evaluaciones_empleado (
+  id                uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  tenant_id         uuid NOT NULL REFERENCES te_tenants(id) ON DELETE CASCADE,
+  empleado_id       uuid NOT NULL REFERENCES te_empleados(id) ON DELETE CASCADE,
+  periodo           text NOT NULL,                 -- libre: "2026-T1", "Anual 2026"
+  fecha_evaluacion  date NOT NULL DEFAULT CURRENT_DATE,
+  evaluador_id      uuid REFERENCES te_usuarios(id),
+  calificacion      numeric(4,1) CHECK (calificacion BETWEEN 0 AND 10),
+  fortalezas        text,
+  areas_oportunidad text,
+  comentarios       text,
+  creado_en timestamptz NOT NULL DEFAULT now(), creado_por uuid,
+  modificado_en timestamptz NOT NULL DEFAULT now(), modificado_por uuid
+);
+CREATE INDEX IF NOT EXISTS ix_evalemp_emp ON te_evaluaciones_empleado(tenant_id, empleado_id);
+DROP TRIGGER IF EXISTS tg_aud_evalemp ON te_evaluaciones_empleado;
+CREATE TRIGGER tg_aud_evalemp BEFORE INSERT OR UPDATE ON te_evaluaciones_empleado FOR EACH ROW EXECUTE FUNCTION tg_auditoria();
+
+-- ---------------------------------------------------------------------------
+-- 4. Beneficios y prestaciones (catálogo por tenant + asignación por empleado)
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS tc_tipos_beneficio (
+  id            uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  tenant_id     uuid NOT NULL REFERENCES te_tenants(id) ON DELETE CASCADE,
+  clave         text NOT NULL,
+  titulo        text NOT NULL,
+  descripcion   text,
+  activo        boolean NOT NULL DEFAULT true,
+  creado_en timestamptz NOT NULL DEFAULT now(), creado_por uuid,
+  modificado_en timestamptz NOT NULL DEFAULT now(), modificado_por uuid,
+  UNIQUE (tenant_id, clave)
+);
+DROP TRIGGER IF EXISTS tg_aud_tbenef ON tc_tipos_beneficio;
+CREATE TRIGGER tg_aud_tbenef BEFORE INSERT OR UPDATE ON tc_tipos_beneficio FOR EACH ROW EXECUTE FUNCTION tg_auditoria();
+
+CREATE TABLE IF NOT EXISTS te_beneficios_empleado (
+  id                uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  tenant_id         uuid NOT NULL REFERENCES te_tenants(id) ON DELETE CASCADE,
+  empleado_id       uuid NOT NULL REFERENCES te_empleados(id) ON DELETE CASCADE,
+  tipo_beneficio_id uuid NOT NULL REFERENCES tc_tipos_beneficio(id),
+  fecha_inicio      date NOT NULL DEFAULT CURRENT_DATE,
+  fecha_fin         date,
+  monto             numeric(12,2),
+  activo            boolean NOT NULL DEFAULT true,
+  observaciones     text,
+  creado_en timestamptz NOT NULL DEFAULT now(), creado_por uuid,
+  modificado_en timestamptz NOT NULL DEFAULT now(), modificado_por uuid
+);
+CREATE INDEX IF NOT EXISTS ix_benemp_emp ON te_beneficios_empleado(tenant_id, empleado_id);
+DROP TRIGGER IF EXISTS tg_aud_benemp ON te_beneficios_empleado;
+CREATE TRIGGER tg_aud_benemp BEFORE INSERT OR UPDATE ON te_beneficios_empleado FOR EACH ROW EXECUTE FUNCTION tg_auditoria();
+
+-- Catálogo base de prestaciones comunes en México, por tenant (ajustable por el usuario después)
+INSERT INTO tc_tipos_beneficio (tenant_id, clave, titulo, descripcion)
+SELECT t.id, b.clave, b.titulo, b.descripcion
+FROM te_tenants t
+CROSS JOIN (VALUES
+  ('gmm',        'Seguro de gastos médicos mayores', 'Cobertura médica privada adicional al IMSS'),
+  ('vida',       'Seguro de vida',                    'Cobertura por fallecimiento o invalidez'),
+  ('despensa',   'Vales de despensa',                 'Prestación mensual en vales o monedero electrónico'),
+  ('ahorro',     'Fondo de ahorro',                    'Aportación empresa-empleado, retirable según política'),
+  ('ptu',        'Reparto de utilidades (PTU)',        'Pago anual conforme a LFT Art. 117-131'),
+  ('prima_dom',  'Prima dominical',                    'LFT Art. 71: 25% adicional por trabajar en domingo')
+) AS b(clave, titulo, descripcion)
+ON CONFLICT (tenant_id, clave) DO NOTHING;
+
+-- ---------------------------------------------------------------------------
+-- 5. RLS — mismo patrón que el resto del esquema (tenant_id = current_tenant_id())
+-- ---------------------------------------------------------------------------
+DO $$
+DECLARE t text;
+BEGIN
+  FOREACH t IN ARRAY ARRAY['te_vacaciones_periodos','te_capacitaciones_empleado','te_evaluaciones_empleado','tc_tipos_beneficio','te_beneficios_empleado']
+  LOOP
+    EXECUTE format('ALTER TABLE %I ENABLE ROW LEVEL SECURITY', t);
+    EXECUTE format('DROP POLICY IF EXISTS p_%1$s_sel ON %1$s', t);
+    EXECUTE format('DROP POLICY IF EXISTS p_%1$s_ins ON %1$s', t);
+    EXECUTE format('DROP POLICY IF EXISTS p_%1$s_upd ON %1$s', t);
+    EXECUTE format('DROP POLICY IF EXISTS p_%1$s_del ON %1$s', t);
+    EXECUTE format('CREATE POLICY p_%1$s_sel ON %1$s FOR SELECT USING (tenant_id = current_tenant_id())', t);
+    EXECUTE format('CREATE POLICY p_%1$s_ins ON %1$s FOR INSERT WITH CHECK (tenant_id = current_tenant_id())', t);
+    EXECUTE format('CREATE POLICY p_%1$s_upd ON %1$s FOR UPDATE USING (tenant_id = current_tenant_id())', t);
+    EXECUTE format('CREATE POLICY p_%1$s_del ON %1$s FOR DELETE USING (tenant_id = current_tenant_id())', t);
+  END LOOP;
+END $$;
+
+-- ---------------------------------------------------------------------------
+-- 6. Storage — bucket privado para expediente (fotos + documentos con datos
+--    personales/identificación: INE, CURP, comprobante de domicilio). Privado
+--    a propósito (no público): se sirve con signed URLs de corta duración
+--    desde el frontend, mismo criterio de cuidado que ya aplicamos a los
+--    datos biométricos del checador.
+--    Convención de ruta: {tenant_id}/{empleado_id}/{archivo}
+-- ---------------------------------------------------------------------------
+INSERT INTO storage.buckets (id, name, public)
+VALUES ('expedientes', 'expedientes', false)
+ON CONFLICT (id) DO NOTHING;
+
+DROP POLICY IF EXISTS p_storage_expedientes_sel ON storage.objects;
+DROP POLICY IF EXISTS p_storage_expedientes_ins ON storage.objects;
+DROP POLICY IF EXISTS p_storage_expedientes_upd ON storage.objects;
+DROP POLICY IF EXISTS p_storage_expedientes_del ON storage.objects;
+
+CREATE POLICY p_storage_expedientes_sel ON storage.objects FOR SELECT TO authenticated
+  USING (bucket_id = 'expedientes' AND (storage.foldername(name))[1] = current_tenant_id()::text);
+CREATE POLICY p_storage_expedientes_ins ON storage.objects FOR INSERT TO authenticated
+  WITH CHECK (bucket_id = 'expedientes' AND (storage.foldername(name))[1] = current_tenant_id()::text);
+CREATE POLICY p_storage_expedientes_upd ON storage.objects FOR UPDATE TO authenticated
+  USING (bucket_id = 'expedientes' AND (storage.foldername(name))[1] = current_tenant_id()::text);
+CREATE POLICY p_storage_expedientes_del ON storage.objects FOR DELETE TO authenticated
+  USING (bucket_id = 'expedientes' AND (storage.foldername(name))[1] = current_tenant_id()::text);

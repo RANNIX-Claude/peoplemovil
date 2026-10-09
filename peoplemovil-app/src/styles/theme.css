@@ -24,6 +24,16 @@
   --card-sh:       0 2px 12px rgba(0,0,0,.08);
   --sidebar-w:     220px;
 
+  /* --- Complementos de paleta (tintes/variantes compartidos RANNIX, p.ej. IRP) --- */
+  --accent-tint:   #F8F5FF;   /* tinte más claro: fondos de encabezado de tabla, hover sutil */
+  --accent-tint2:  #F0EEF8;   /* tinte alterno: bordes/separadores sobre fondo morado claro */
+  --green-dark:    #057642;   /* verde más oscuro: texto sobre badge/KPI de éxito */
+  --red-dark:      #B24020;   /* rojo más oscuro: texto sobre badge/alerta crítica */
+  --gold-dark:     #E8A020;   /* dorado más oscuro: variante de alerta/pendiente */
+  --gold-alt:      #F59E0B;   /* dorado alterno: semáforos y advertencias */
+  --border-soft:   #E5E7EB;   /* borde más claro: tablas y cards densas */
+  --neutral:       #6B7280;   /* gris neutro: estados "indefinido"/sin dato */
+
   /* --- Alias semánticos --- */
   --color-primary:    var(--accent);
   --color-success:    var(--green);

@@ -27,6 +27,7 @@ import Preasignacion from './pages/admin/Preasignacion.jsx';
 import ConfirmacionAsistencia from './pages/admin/ConfirmacionAsistencia.jsx';
 import CalendarioEntrevistas from './pages/admin/CalendarioEntrevistas.jsx';
 import AltaMasivaEmpleados from './pages/admin/AltaMasivaEmpleados.jsx';
+import ExpedienteEmpleado from './pages/admin/ExpedienteEmpleado.jsx';
 import EntrevistaGrupal from './pages/admin/EntrevistaGrupal.jsx';
 import FirmaContratos from './pages/admin/FirmaContratos.jsx';
 import CursoInduccion from './pages/admin/CursoInduccion.jsx';
@@ -58,6 +59,7 @@ export default function App() {
           <Route index element={<Navigate to="dashboard" replace />} />
           <Route path="dashboard" element={<Dashboard />} />
           <Route path="personal" element={<Personal />} />
+          <Route path="personal/:id" element={<ExpedienteEmpleado />} />
           <Route path="sitios" element={<SitiosAsignacion />} />
           <Route path="arbol" element={<ArbolReservaciones />} />
           <Route path="preasignacion" element={<Preasignacion />} />
