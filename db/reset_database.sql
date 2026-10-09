@@ -6175,3 +6175,115 @@ CREATE POLICY p_storage_expedientes_upd ON storage.objects FOR UPDATE TO authent
   USING (bucket_id = 'expedientes' AND (storage.foldername(name))[1] = current_tenant_id()::text);
 CREATE POLICY p_storage_expedientes_del ON storage.objects FOR DELETE TO authenticated
   USING (bucket_id = 'expedientes' AND (storage.foldername(name))[1] = current_tenant_id()::text);
+
+-- ============================================================================
+-- Migración 025 — Resolución segura de tenant por sesión (current_tenant_id)
+-- ============================================================================
+-- Problema encontrado probando en vivo las cuentas demo multi-vertical de la
+-- Migración 017 (CLAUDE.md §15): current_tenant_id() resolvía SIEMPRE al
+-- tenant fijo que manda el cliente en el header `x-tenant-id` (ver
+-- src/lib/supabase.js, DEMO_TENANT_ID hardcodeado para TODO usuario, sin
+-- importar su sesión real). Confirmado en vivo: login exitoso con
+-- admin.construccion01@peoplemovil.demo -> "Tu cuenta no tiene un usuario
+-- interno activo" (mi_usuario() busca tenant_id = current_tenant_id() =
+-- tenant 1, pero la fila real de este usuario vive en tenant_id = tenant
+-- Construcción). Dos problemas, no solo uno:
+--   1. Correctitud: los 6 logins multi-tenant de la Migración 017 no podían
+--      funcionar nunca con el header fijo.
+--   2. Seguridad: cualquier request autenticado podía mandar CUALQUIER valor
+--      de x-tenant-id y leer/escribir datos de un tenant ajeno, porque el
+--      header nunca se validaba contra la membresía real del usuario (RLS
+--      confiaba en current_tenant_id(), que confiaba ciegamente en el
+--      header).
+-- Fix: current_tenant_id() ahora resuelve el tenant de una sesión autenticada
+-- a partir de la membresía real del usuario (te_usuarios.tenant_id para
+-- personal interno, te_empleados.tenant_id para freelance), vía su
+-- auth_user_id (current_user_id(), ya corregido en la Migración 013) --
+-- ambas columnas son UNIQUE a nivel global, así que no hace falta (ni se
+-- puede, sería circular) filtrar por tenant_id para encontrarlas. El header
+-- x-tenant-id queda SOLO como fallback para accesos anónimos (portal público
+-- de vacantes, demo sin login) -- nunca se usa si hay una sesión autenticada.
+-- SECURITY DEFINER + search_path fijo: el SELECT interno a te_usuarios/
+-- te_empleados debe correr sin pasar por las políticas RLS de esas tablas
+-- (que a su vez dependen de current_tenant_id() -- sería recursivo/circular
+-- si corriera como invoker).
+-- Aplicada a la base real vía `apply_migration` (2026-10-09) y probada en
+-- vivo en el navegador con 5 cuentas: admin.demo01 (tenant eventos, sigue
+-- viendo sus 11 empleados -- sin regresión), admin.construccion01 (antes
+-- mostraba "cuenta no vinculada", ahora dashboard con sus 3 sitios/30
+-- empleados reales), admin.seguridad01 (5 sitios/30 empleados reales), y
+-- freelance.construccion01 (portal freelance, camino te_empleados -- perfil
+-- correcto: Jorge Hernández, folio 1, Albañil).
+-- ============================================================================
+
+CREATE OR REPLACE FUNCTION public.current_tenant_id()
+ RETURNS uuid
+ LANGUAGE plpgsql
+ STABLE
+ SECURITY DEFINER
+ SET search_path = public, pg_temp
+AS $function$
+DECLARE
+  h_tenant text;
+  v_user   uuid;
+  v_tenant uuid;
+BEGIN
+  -- 1. Contexto de servidor (SET LOCAL app.current_tenant desde una función
+  --    interna o un script administrativo) -- máxima prioridad, explícito.
+  v_tenant := NULLIF(current_setting('app.current_tenant', true), '')::uuid;
+  IF v_tenant IS NOT NULL THEN
+    RETURN v_tenant;
+  END IF;
+
+  -- 2. Sesión autenticada: el tenant real es el de la membresía del usuario,
+  --    nunca el que mande el cliente.
+  v_user := current_user_id();
+  IF v_user IS NOT NULL THEN
+    SELECT tenant_id INTO v_tenant FROM te_usuarios WHERE auth_user_id = v_user LIMIT 1;
+    IF v_tenant IS NOT NULL THEN
+      RETURN v_tenant;
+    END IF;
+
+    SELECT tenant_id INTO v_tenant FROM te_empleados WHERE auth_user_id = v_user LIMIT 1;
+    IF v_tenant IS NOT NULL THEN
+      RETURN v_tenant;
+    END IF;
+  END IF;
+
+  -- 3. Sin sesión autenticada (anon) o autenticado pero sin cuenta ligada
+  --    todavía: único caso donde se confía en el header, igual que antes.
+  BEGIN
+    h_tenant := current_setting('request.headers', true)::json->>'x-tenant-id';
+  EXCEPTION WHEN OTHERS THEN
+    h_tenant := NULL;
+  END;
+  RETURN NULLIF(h_tenant, '')::uuid;
+EXCEPTION WHEN OTHERS THEN
+  RETURN NULL;
+END $function$;
+
+-- ============================================================================
+-- Migración 026 -- Fotos reales de personal en vez del ícono DiceBear (2026-10-09,
+-- pedido explícito del usuario: usar las 60 fotografías tipo headshot provistas
+-- en doc/fotos en vez del avatar sintético de la Migración 017/018 (D13). Se
+-- repiten a propósito (60 fotos para ~165 empleados reales en la base) -- el
+-- usuario confirmó que repetir no importa, lo que importa es "esa forma"
+-- (headshot de oficina). Fotos copiadas y renumeradas a
+-- peoplemovil-app/public/fotos-demo/foto-01.png..foto-60.png y servidas desde
+-- el sitio en vivo (mismo patrón que las URLs públicas de DiceBear que
+-- reemplazan: foto_url es una URL http(s) completa, sin pasar por el bucket
+-- privado "expedientes" de la Migración 024 -- ver src/lib/storage.js,
+-- resolverUrlArchivo ya soporta ambos casos). Asignación round-robin
+-- determinista por (tenant_id, folio), no aleatoria, para que sea reproducible.
+-- ============================================================================
+WITH numerados AS (
+  SELECT id, row_number() OVER (ORDER BY tenant_id, folio) AS rn
+  FROM te_empleados
+)
+UPDATE te_empleados e
+SET foto_url = 'https://peoplemovil00.netlify.app/fotos-demo/foto-'
+  || lpad((((n.rn - 1) % 60) + 1)::text, 2, '0') || '.png'
+FROM numerados n
+WHERE n.id = e.id;
+
+-- ============================================================================
