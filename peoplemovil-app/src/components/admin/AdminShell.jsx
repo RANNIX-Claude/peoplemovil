@@ -43,6 +43,11 @@ const SECCIONES = [
   ]}
 ];
 
+// Etiqueta de build: AAMMDD-HHMM del momento en que se hizo este deploy.
+// Se actualiza a mano en cada release para poder confirmar a simple vista
+// qué versión quedó realmente publicada (pedido del usuario 2026-10-08).
+const BUILD_TAG = '261008-0710';
+
 export default function AdminShell() {
   const [openMobile, setOpenMobile] = useState(false);
   const ambiente = import.meta.env.VITE_AMBIENTE;
@@ -63,6 +68,7 @@ export default function AdminShell() {
             <div>
               <div className="brand-name">PeopleMovil</div>
               <div className="brand-sub">RANNIX · Admin</div>
+              <div style={{ fontSize: 10, color: 'var(--muted)', opacity: 0.7, marginTop: 2 }}>build {BUILD_TAG}</div>
             </div>
           </div>
         </div>
