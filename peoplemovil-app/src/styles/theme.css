@@ -395,3 +395,16 @@ hr { border: none; border-top: 1px solid var(--border); margin: 40px 0; }
   .mobile-menu-btn { display: inline-flex !important; }
 }
 .mobile-menu-btn { display: none; align-items: center; gap: 6px; }
+
+/* Portal freelance -- responsivo: una columna en celular, layout de
+   escritorio más ancho con "Por confirmar"/"Confirmados" lado a lado
+   (misma hoja, sin tener que desplazarse entre secciones) en pantallas
+   grandes. Mobile-first: el layout de celular es el caso base. */
+.portal-main { max-width: 720px; margin: 0 auto; padding: 20px 16px; }
+@media (min-width: 900px) {
+  .portal-main { max-width: 1120px; padding: 28px 24px; }
+}
+.mis-eventos-cols { display: grid; grid-template-columns: 1fr; gap: 24px; }
+@media (min-width: 900px) {
+  .mis-eventos-cols { grid-template-columns: 1fr 1fr; align-items: start; }
+}

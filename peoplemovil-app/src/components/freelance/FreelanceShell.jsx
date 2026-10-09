@@ -65,7 +65,7 @@ export default function FreelanceShell() {
           </button>
         )}
       </header>
-      <main style={{ maxWidth: 720, margin: '0 auto', padding: '20px 16px' }}>
+      <main className="portal-main">
         <Outlet />
       </main>
       {user && (

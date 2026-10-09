@@ -78,24 +78,33 @@ export default function MisEventos() {
 
       {loading && <p>Cargando…</p>}
 
-      <h3>Por confirmar ({porConfirmar.length})</h3>
-      {porConfirmar.length === 0 && (
-        <p style={{ fontSize: 13, color: 'var(--muted)' }}>No tenés eventos pendientes de confirmar.</p>
-      )}
-      <div style={{ display: 'grid', gap: 10, marginBottom: 24 }}>
-        {porConfirmar.map(e => (
-          <EventoCard key={e.id} e={e} showUrgencia onClick={() => { setSel(e); setAccion('confirmar'); }} />
-        ))}
-      </div>
+      {/* En celular se apilan (base mobile-first); en escritorio quedan lado
+          a lado en la misma hoja, como el legado -- sin tener que bajar para
+          ver los confirmados. */}
+      <div className="mis-eventos-cols" style={{ marginBottom: 24 }}>
+        <div>
+          <h3>Por confirmar ({porConfirmar.length})</h3>
+          {porConfirmar.length === 0 && (
+            <p style={{ fontSize: 13, color: 'var(--muted)' }}>No tenés eventos pendientes de confirmar.</p>
+          )}
+          <div style={{ display: 'grid', gap: 10, maxHeight: 520, overflowY: 'auto', paddingRight: 2 }}>
+            {porConfirmar.map(e => (
+              <EventoCard key={e.id} e={e} showUrgencia onClick={() => { setSel(e); setAccion('confirmar'); }} />
+            ))}
+          </div>
+        </div>
 
-      <h3>Confirmados ({confirmados.length})</h3>
-      {confirmados.length === 0 && (
-        <p style={{ fontSize: 13, color: 'var(--muted)' }}>Sin eventos confirmados todavía.</p>
-      )}
-      <div style={{ display: 'grid', gap: 10, marginBottom: 24 }}>
-        {confirmados.map(e => (
-          <EventoCard key={e.id} e={e} onClick={() => { setSel(e); setAccion('cancelar'); }} />
-        ))}
+        <div>
+          <h3>Confirmados ({confirmados.length})</h3>
+          {confirmados.length === 0 && (
+            <p style={{ fontSize: 13, color: 'var(--muted)' }}>Sin eventos confirmados todavía.</p>
+          )}
+          <div style={{ display: 'grid', gap: 10, maxHeight: 520, overflowY: 'auto', paddingRight: 2 }}>
+            {confirmados.map(e => (
+              <EventoCard key={e.id} e={e} onClick={() => { setSel(e); setAccion('cancelar'); }} />
+            ))}
+          </div>
+        </div>
       </div>
 
       <h3>Pasados ({pasados.length})</h3>
