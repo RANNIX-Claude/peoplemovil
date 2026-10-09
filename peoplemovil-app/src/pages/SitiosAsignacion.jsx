@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import Modal from '../components/ui/Modal.jsx';
 import TablaWrap from '../components/ui/TablaWrap.jsx';
 import Badge from '../components/ui/Badge.jsx';
@@ -28,6 +29,7 @@ const DETALLE_VACIO = {
 // Vista 2: Detalle de pedido — Registro (datos principales) + Matriz de puestos (agregar detalle) + Movimientos
 export default function SitiosAsignacion() {
   useModuleAudit('sitios_asignacion');
+  const nav = useNavigate();
 
   // --- listado ---
   const [pedidos, setPedidos] = useState([]);
@@ -70,6 +72,10 @@ export default function SitiosAsignacion() {
   const [nuevoEventoTitulo, setNuevoEventoTitulo] = useState('');
   const [detalleOpen, setDetalleOpen] = useState(false);
   const [nuevoDetalle, setNuevoDetalle] = useState(DETALLE_VACIO);
+  const [editandoDetalleId, setEditandoDetalleId] = useState(null); // null = alta, id = editando ese te_pedidos_detalle
+  const [celdaDetalle, setCeldaDetalle] = useState(null); // popup "Detalle" al dar click en una celda de la matriz
+  const [menuCeldaId, setMenuCeldaId] = useState(null); // pedido_detalle_id con el menú contextual (Editar/Reservaciones/Cancelar/Liberar) abierto
+  const [menuPos, setMenuPos] = useState(null); // {top,left} en viewport, calculado del botón ▾ (la tabla tiene overflow-x:auto, así que el menú usa position:fixed para no quedar recortado)
   const [msg, setMsg] = useState('');
   const [msgDetalle, setMsgDetalle] = useState('');
 
@@ -151,7 +157,7 @@ export default function SitiosAsignacion() {
   const cargarDetallePedido = async (ped) => {
     setPedidoSel(ped); setPestana('general');
     const [{ data: d }, { data: r }, { data: m }, { data: pepRow }] = await Promise.all([
-      supabase.from('te_pedidos_detalle').select('*, tc_puestos(titulo), tc_productos(titulo)').eq('pedido_id', ped.id),
+      supabase.from('te_pedidos_detalle').select('*, tc_puestos(titulo), tc_productos(titulo), tc_lugares_cita(titulo), tc_fases_evento(titulo)').eq('pedido_id', ped.id),
       supabase.from('te_reservaciones').select('*, te_empleados(nombres, apellido_paterno, folio)').eq('pedido_id', ped.id).limit(200),
       supabase.rpc('matriz_puestos_pedido', { p_pedido_id: ped.id }),
       ped.partida_presupuestal_id
@@ -192,8 +198,29 @@ export default function SitiosAsignacion() {
       g.presupuesto += Number(r.costo_unit || r.precio || 0) * Number(r.cantidad || 0);
     }
     const fechas = Array.from(fechasSet).sort();
-    return { fechas, grupos: Array.from(grupos.values()) };
+    // Presupuesto POR DÍA real (como en el legado: una cifra por columna, no un
+    // promedio del pedido completo) -- suma, para cada fecha, cantidad × costo
+    // de todos los renglones que tienen celda ese día.
+    const presupuestoPorFecha = new Map();
+    for (const f of fechas) {
+      let total = 0;
+      for (const g of grupos.values()) {
+        const c = g.celdas.get(f);
+        if (c) total += Number(c.cantidad || 0) * Number(c.costo_unit ?? c.precio ?? 0);
+      }
+      presupuestoPorFecha.set(f, total);
+    }
+    return { fechas, grupos: Array.from(grupos.values()), presupuestoPorFecha };
   }, [matrizFilas]);
+
+  // Popup "Detalle" al dar click en una celda de la Matriz de Puestos — equivalente
+  // a la ventana del sistema legado (ID, Lugar de Cita, Fecha Cita, Fecha Fin Cita,
+  // Fecha Liberación, Completar con Similares, Cantidad Reservados / Real / con
+  // Preasignados, Porcentaje Completo, Fase del Evento).
+  const verDetalleCelda = (pedidoDetalleId) => {
+    const d = detalles.find(x => x.id === pedidoDetalleId);
+    if (d) setCeldaDetalle(d);
+  };
 
   const liberarPedido = async () => {
     if (!pedidoSel) return;
@@ -274,7 +301,7 @@ export default function SitiosAsignacion() {
 
   const puestoDetalle = puestos.find(p => p.id === nuevoDetalle.puesto_id);
 
-  const agregarDetalle = async (e) => {
+  const guardarDetalle = async (e) => {
     e.preventDefault();
     setMsgDetalle('');
     if (!nuevoDetalle.puesto_id) { setMsgDetalle('❌ Elegí un producto (define el puesto).'); return; }
@@ -284,8 +311,6 @@ export default function SitiosAsignacion() {
       return;
     }
     const payload = {
-      tenant_id: DEMO_TENANT_ID,
-      pedido_id: pedidoSel.id,
       puesto_id: nuevoDetalle.puesto_id,
       producto_id: nuevoDetalle.producto_id || null,
       id_tipo_personal: nuevoDetalle.id_tipo_personal || null,
@@ -297,11 +322,66 @@ export default function SitiosAsignacion() {
       completar_productos_similares: nuevoDetalle.completar_productos_similares,
       indicaciones_especiales: nuevoDetalle.indicaciones_especiales || null
     };
-    const { error } = await supabase.from('te_pedidos_detalle').insert(payload);
-    if (error) { setMsgDetalle('❌ ' + error.message); return; }
-    await logAccion('sitios_asignacion', 'INSERT_DETALLE', `pedido ${pedidoSel.folio}: +${payload.cantidad} de producto`);
+    if (editandoDetalleId) {
+      const { error } = await supabase.from('te_pedidos_detalle').update(payload).eq('id', editandoDetalleId);
+      if (error) { setMsgDetalle('❌ ' + error.message); return; }
+      await logAccion('sitios_asignacion', 'EDITAR_DETALLE', `pedido ${pedidoSel.folio}: detalle ${editandoDetalleId}`);
+    } else {
+      const { error } = await supabase.from('te_pedidos_detalle').insert({ ...payload, tenant_id: DEMO_TENANT_ID, pedido_id: pedidoSel.id });
+      if (error) { setMsgDetalle('❌ ' + error.message); return; }
+      await logAccion('sitios_asignacion', 'INSERT_DETALLE', `pedido ${pedidoSel.folio}: +${payload.cantidad} de producto`);
+    }
     setDetalleOpen(false);
     setNuevoDetalle(DETALLE_VACIO);
+    setEditandoDetalleId(null);
+    await cargarDetallePedido(pedidoSel);
+  };
+
+  // --- Menú contextual de celda (Editar / Reservaciones / Cancelar / Liberar) ---
+  // Réplica del menú de apoyo.rh.ocesa.mx/Pedidos al hacer click en una celda de
+  // la matriz. "Liberar"/"Cancelar" aquí actúan sobre ESE renglón (te_pedidos_detalle),
+  // a diferencia del botón "Liberar pedido" que libera todos los renglones del pedido.
+  const abrirEditarDetalle = (pedidoDetalleId) => {
+    const d = detalles.find(x => x.id === pedidoDetalleId);
+    if (!d) return;
+    setNuevoDetalle({
+      id_tipo_personal: d.id_tipo_personal || '',
+      producto_id: d.producto_id || '',
+      puesto_id: d.puesto_id || '',
+      cantidad: d.cantidad ?? 1,
+      turnos: d.turnos ?? 1,
+      fecha_cita: d.fecha_cita || '',
+      fecha_liberacion: d.fecha_liberacion ? d.fecha_liberacion.slice(0, 10) : '',
+      presentacion_id: d.presentacion_id || '',
+      completar_productos_similares: !!d.completar_productos_similares,
+      indicaciones_especiales: d.indicaciones_especiales || ''
+    });
+    setEditandoDetalleId(pedidoDetalleId);
+    setMsgDetalle('');
+    setDetalleOpen(true);
+  };
+
+  const irAReservaciones = (pedidoDetalleId) => {
+    nav(`/admin/preasignacion?detalle=${pedidoDetalleId}`);
+  };
+
+  const cancelarDetalleLinea = async (pedidoDetalleId) => {
+    if (!confirm('¿Cancelar este renglón del pedido? Sus reservaciones vigentes también se cancelan.')) return;
+    const { error } = await supabase.from('te_pedidos_detalle').update({ status_detalle: 'cancelado' }).eq('id', pedidoDetalleId);
+    if (error) { setMsg('❌ ' + error.message); return; }
+    await supabase.from('te_reservaciones').update({ estado: 'cancelado', regla_aplicada: 'cancelacion_detalle' })
+      .eq('pedido_detalle_id', pedidoDetalleId).not('estado', 'in', '(procesado,cancelado)');
+    await logAccion('sitios_asignacion', 'CANCELAR_DETALLE', `detalle ${pedidoDetalleId}`);
+    setMsg('✓ Renglón cancelado');
+    await cargarDetallePedido(pedidoSel);
+  };
+
+  const liberarDetalleLinea = async (pedidoDetalleId) => {
+    if (!confirm('¿Liberar este renglón? Pasa a LIBERADO y se publica en el portal.')) return;
+    const { error } = await supabase.from('te_pedidos_detalle').update({ status_detalle: 'liberado' }).eq('id', pedidoDetalleId);
+    if (error) { setMsg('❌ ' + error.message); return; }
+    await logAccion('sitios_asignacion', 'LIBERAR_DETALLE', `detalle ${pedidoDetalleId}`);
+    setMsg('✓ Renglón liberado');
     await cargarDetallePedido(pedidoSel);
   };
 
@@ -424,7 +504,7 @@ export default function SitiosAsignacion() {
                   Matriz de Puestos — fechas como columnas, Bloque + Producto como filas (equivalente a la matriz del sistema Lobo, vía <code>matriz_puestos_pedido()</code>).
                 </span>
                 {pedidoSel.status !== 'cancelado' && (
-                  <button className="btn sm" onClick={() => { setNuevoDetalle(DETALLE_VACIO); setMsgDetalle(''); setDetalleOpen(true); }}>+ Agregar detalle</button>
+                  <button className="btn sm" onClick={() => { setNuevoDetalle(DETALLE_VACIO); setEditandoDetalleId(null); setMsgDetalle(''); setDetalleOpen(true); }}>+ Agregar detalle</button>
                 )}
               </div>
               {matrizPivot.grupos.length === 0 ? (
@@ -446,9 +526,52 @@ export default function SitiosAsignacion() {
                           <td>{g.producto_titulo}</td>
                           {matrizPivot.fechas.map(f => {
                             const c = g.celdas.get(f);
+                            const menuOpen = c && menuCeldaId === c.pedido_detalle_id;
                             return (
-                              <td key={f} style={{ textAlign: 'center', fontSize: 12 }}>
-                                {c ? `${c.cantidad} - T ${Number(c.turnos || 0).toFixed(2)}` : '—'}
+                              <td key={f} style={{ textAlign: 'center', fontSize: 12, position: 'relative' }}>
+                                {c ? (
+                                  <>
+                                    <span onClick={() => verDetalleCelda(c.pedido_detalle_id)} title="Ver detalle" style={{ cursor: 'pointer' }}>
+                                      {c.cantidad} - T {Number(c.turnos || 0).toFixed(2)}
+                                    </span>{' '}
+                                    <button type="button" title="Más acciones"
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        if (menuOpen) { setMenuCeldaId(null); return; }
+                                        const r = e.currentTarget.getBoundingClientRect();
+                                        setMenuPos({ top: r.bottom + 4, left: r.left + r.width / 2 });
+                                        setMenuCeldaId(c.pedido_detalle_id);
+                                      }}
+                                      style={{ border: 'none', background: 'transparent', cursor: 'pointer', color: 'var(--muted)', fontSize: 10, padding: '0 2px', verticalAlign: 'middle' }}>
+                                      ▾
+                                    </button>
+                                    {menuOpen && menuPos && (
+                                      <>
+                                        <div onClick={() => setMenuCeldaId(null)} style={{ position: 'fixed', inset: 0, zIndex: 15 }} />
+                                        <div style={{
+                                          position: 'fixed', top: menuPos.top, left: menuPos.left, transform: 'translateX(-50%)', zIndex: 20,
+                                          background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 'var(--border-radius)',
+                                          boxShadow: 'var(--card-sh)', minWidth: 160, textAlign: 'left', overflow: 'hidden'
+                                        }}>
+                                          {[
+                                            ['✏️ Editar', () => abrirEditarDetalle(c.pedido_detalle_id)],
+                                            ['👥 Reservaciones', () => irAReservaciones(c.pedido_detalle_id)],
+                                            ['✗ Cancelar', () => cancelarDetalleLinea(c.pedido_detalle_id)],
+                                            ['🚀 Liberar', () => liberarDetalleLinea(c.pedido_detalle_id)]
+                                          ].map(([label, fn]) => (
+                                            <button key={label} type="button"
+                                              onClick={() => { setMenuCeldaId(null); fn(); }}
+                                              style={{ display: 'block', width: '100%', textAlign: 'left', padding: '8px 12px', border: 'none', background: 'transparent', cursor: 'pointer', fontSize: 12, fontWeight: 600 }}
+                                              onMouseEnter={e => e.currentTarget.style.background = 'var(--surface2, rgba(0,0,0,.04))'}
+                                              onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
+                                              {label}
+                                            </button>
+                                          ))}
+                                        </div>
+                                      </>
+                                    )}
+                                  </>
+                                ) : '—'}
                               </td>
                             );
                           })}
@@ -462,9 +585,10 @@ export default function SitiosAsignacion() {
                         })}
                       </tr>
                       <tr style={{ fontWeight: 800 }}>
-                        <td colSpan={2 + matrizPivot.fechas.length} style={{ textAlign: 'right' }}>
-                          Presupuesto por día: ${fmt(matrizPivot.grupos.reduce((s, g) => s + g.presupuesto, 0) / Math.max(matrizPivot.fechas.length, 1))}
-                        </td>
+                        <td colSpan="2">Presupuesto por día</td>
+                        {matrizPivot.fechas.map(f => (
+                          <td key={f} style={{ textAlign: 'center' }}>${fmt(matrizPivot.presupuestoPorFecha?.get(f) || 0)}</td>
+                        ))}
                       </tr>
                     </tbody>
                   </table>
@@ -543,11 +667,11 @@ export default function SitiosAsignacion() {
           </div>
         )}
 
-        {/* Modal: Agregar Detalle (Escenario 1, pasos 11-22) */}
-        <Modal open={detalleOpen} onClose={() => setDetalleOpen(false)} title="Agregar detalle al pedido" wide
+        {/* Modal: Agregar/Editar Detalle (Escenario 1, pasos 11-22; "Editar" reutiliza la misma pantalla, como en el legado) */}
+        <Modal open={detalleOpen} onClose={() => setDetalleOpen(false)} title={editandoDetalleId ? 'Editar detalle del pedido' : 'Agregar detalle al pedido'} wide
           footer={<><button className="btn ghost" onClick={() => setDetalleOpen(false)}>Cancelar</button>
-            <button className="btn" onClick={agregarDetalle}>Agregar registro</button></>}>
-          <form onSubmit={agregarDetalle} style={{ display: 'grid', gap: 12 }}>
+            <button className="btn" onClick={guardarDetalle}>{editandoDetalleId ? 'Guardar cambios' : 'Agregar registro'}</button></>}>
+          <form onSubmit={guardarDetalle} style={{ display: 'grid', gap: 12 }}>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
               <div><label className="label">Tipo de personal</label>
                 <select className="field" value={nuevoDetalle.id_tipo_personal} onChange={e => setNuevoDetalle({ ...nuevoDetalle, id_tipo_personal: e.target.value })}>
@@ -602,6 +726,51 @@ export default function SitiosAsignacion() {
             </div>
             {msgDetalle && <p style={{ fontSize: 12 }}>{msgDetalle}</p>}
           </form>
+        </Modal>
+
+        {/* Popup "Detalle" — al dar click en una celda de la Matriz de Puestos,
+            réplica del popup del sistema legado (apoyo.rh.ocesa.mx/Pedidos) */}
+        <Modal open={!!celdaDetalle} onClose={() => setCeldaDetalle(null)}
+          title={celdaDetalle ? (celdaDetalle.tc_productos?.titulo || celdaDetalle.tc_puestos?.titulo || 'Detalle') : 'Detalle'}
+          footer={<button className="btn ghost" onClick={() => setCeldaDetalle(null)}>Cerrar</button>}>
+          {celdaDetalle && (
+            <div style={{ display: 'grid', gap: 10, fontSize: 13 }}>
+              <div style={{ borderBottom: '2px solid var(--accent)', paddingBottom: 8 }}>
+                <div className="label">ID</div>
+                <div className="mono" style={{ fontSize: 11 }}>{celdaDetalle.id}</div>
+              </div>
+              <div><div className="label">Lugar de Cita</div>
+                <div>{celdaDetalle.lugar_otro ? (celdaDetalle.lugar_otro_descripcion || '—') : (celdaDetalle.tc_lugares_cita?.titulo || nombreSitio)}</div>
+              </div>
+              <div><div className="label">Fecha Cita</div>
+                <div>{celdaDetalle.fecha_cita || '—'}{celdaDetalle.hora_cita_inicio ? ` ${celdaDetalle.hora_cita_inicio}` : ''}</div>
+              </div>
+              <div><div className="label">Fecha Fin Cita</div>
+                <div>
+                  {celdaDetalle.fecha_final_cita
+                    ? new Date(celdaDetalle.fecha_final_cita).toLocaleString('es-MX')
+                    : `${celdaDetalle.fecha_cita || '—'}${celdaDetalle.hora_cita_fin ? ` ${celdaDetalle.hora_cita_fin}` : ''}`}
+                </div>
+              </div>
+              <div><div className="label">Fecha Liberación</div>
+                <div>{celdaDetalle.fecha_liberacion ? new Date(celdaDetalle.fecha_liberacion).toLocaleString('es-MX') : '—'}</div>
+              </div>
+              <div><div className="label">Completar con Similares</div>
+                <div>{celdaDetalle.completar_productos_similares ? 'Sí' : 'No'}</div>
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 10 }}>
+                <div><div className="label">Cantidad Reservados</div><div>{celdaDetalle.cantidad_reservados ?? 0}</div></div>
+                <div><div className="label">Reservados Real</div><div>{celdaDetalle.cantidad_reservados_real ?? 0}</div></div>
+                <div><div className="label">Con Preasignados</div><div>{celdaDetalle.cantidad_reservados_con_pre ?? 0}</div></div>
+              </div>
+              <div><div className="label">Porcentaje Completo</div>
+                <div>{Number(celdaDetalle.porcentaje_completo || 0)}%</div>
+              </div>
+              <div><div className="label">Fase del Evento</div>
+                <div>{celdaDetalle.tc_fases_evento?.titulo || celdaDetalle.fase_evento_str || '—'}</div>
+              </div>
+            </div>
+          )}
         </Modal>
       </div>
     );
