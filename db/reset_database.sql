@@ -6455,3 +6455,48 @@ FROM (VALUES
 WHERE NOT EXISTS (SELECT 1 FROM te_backlog_items WHERE titulo = 'Sin alta individual de empleado');
 
 -- ============================================================================
+-- Migración 029 -- 'forzada' también cuenta como "asignado" para el freelance
+-- ============================================================================
+-- Al probar la Migración 023 contra datos reales se encontró que la mayoría de
+-- las reservaciones demo quedan en estado 'forzada' (asignación directa del
+-- admin en Preasignación, sin pasar por confirmación voluntaria del freelance)
+-- -- y v_agenda_freelance/MisEventos.jsx solo mostraban preasignado/confirmado_*,
+-- así que esas reservaciones eran invisibles en el portal. 'forzada' nunca fue
+-- una excepción a ninguna validación (ver Migración 020, comentario corregido
+-- en Preasignacion.jsx) -- es simplemente "el admin decidió por vos"; para el
+-- freelance es, en los hechos, un evento ya asignado. Se agrega 'forzada' al
+-- mismo conjunto de estados que confirmado_voluntario/confirmado_opcional para
+-- cancelar_mi_reservacion (gateado igual por permitir_cancelar_confirmaciones).
+-- Aplicada a la base real vía apply_migration.
+-- ============================================================================
+CREATE OR REPLACE FUNCTION cancelar_mi_reservacion(p_reservacion uuid)
+RETURNS void AS $$
+DECLARE r te_reservaciones; emp uuid; permitido boolean;
+BEGIN
+  emp := mi_empleado_id();
+  IF emp IS NULL THEN RAISE EXCEPTION 'Sesión sin empleado ligado.'; END IF;
+  SELECT * INTO r FROM te_reservaciones WHERE id = p_reservacion AND tenant_id = current_tenant_id();
+  IF r.id IS NULL THEN RAISE EXCEPTION 'Reservación no existe.'; END IF;
+  IF r.empleado_id <> emp THEN RAISE EXCEPTION 'Esta reservación no te pertenece.'; END IF;
+  IF r.estado NOT IN ('preasignado','confirmado_voluntario','confirmado_opcional','forzada') THEN
+    RAISE EXCEPTION 'Esta reservación ya no se puede cancelar (estado actual: %).', r.estado;
+  END IF;
+
+  IF r.estado IN ('confirmado_voluntario','confirmado_opcional','forzada') THEN
+    SELECT COALESCE(pd.permitir_cancelar_confirmaciones, true) INTO permitido
+      FROM te_pedidos_detalle pd WHERE pd.id = r.pedido_detalle_id;
+    IF NOT COALESCE(permitido, true) THEN
+      RAISE EXCEPTION 'Este evento ya no permite cancelar confirmaciones.';
+    END IF;
+  END IF;
+
+  UPDATE te_reservaciones
+    SET estado = 'cancelado', regla_aplicada = 'CancelacionVoluntariaFreelance',
+        modificado_en = now(), modificado_por = current_user_id()
+    WHERE id = p_reservacion;
+
+  INSERT INTO te_reservacion_bitacora (tenant_id, reservacion_id, actor_user_id, accion, estado_antes, estado_despues, regla_aplicada)
+    VALUES (r.tenant_id, r.id, current_user_id(), 'cancelar', r.estado, 'cancelado', 'CancelacionVoluntariaFreelance');
+END $$ LANGUAGE plpgsql SECURITY DEFINER;
+
+-- ============================================================================

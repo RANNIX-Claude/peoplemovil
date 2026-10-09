@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { Outlet, NavLink, useNavigate, useLocation } from 'react-router-dom';
+import { Toaster } from 'react-hot-toast';
 import { supabase, supabaseReady } from '../../lib/supabase.js';
 
 export default function FreelanceShell() {
@@ -37,6 +38,11 @@ export default function FreelanceShell() {
 
   return (
     <div style={{ minHeight: '100vh', background: 'var(--bg)', paddingBottom: 80 }}>
+      <Toaster position="top-center" toastOptions={{
+        style: { fontSize: 13, fontWeight: 600, borderRadius: 10 },
+        success: { iconTheme: { primary: 'var(--green)', secondary: '#fff' } },
+        error: { iconTheme: { primary: 'var(--red)', secondary: '#fff' } }
+      }} />
       <header style={{
         background: 'var(--accent)', color: '#fff', padding: '14px 20px',
         display: 'flex', justifyContent: 'space-between', alignItems: 'center',
