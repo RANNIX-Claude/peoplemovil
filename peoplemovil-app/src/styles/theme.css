@@ -127,11 +127,12 @@ code, pre, .mono { font-family: 'JetBrains Mono', 'Consolas', 'Courier New', mon
   text-transform: uppercase; letter-spacing: .06em; margin-top: 6px;
 }
 .nav-link {
-  display: block; width: 100%; text-align: left;
+  display: flex; align-items: center; gap: 9px; width: 100%; text-align: left;
   padding: 7px 20px; font-size: 13px; color: var(--muted);
   border: none; background: transparent; font-weight: 500;
   border-left: 3px solid transparent; transition: all .12s;
 }
+.nav-icon { font-size: 14px; line-height: 1; flex-shrink: 0; width: 16px; text-align: center; }
 .nav-link:hover { color: var(--accent); background: rgba(123,94,167,.06); text-decoration: none; }
 .nav-link.active {
   color: var(--accent); border-left-color: var(--accent);

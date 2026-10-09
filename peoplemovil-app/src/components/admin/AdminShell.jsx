@@ -6,40 +6,40 @@ import { supabaseReady } from '../../lib/supabase.js';
 // requiere: código de permiso necesario para ver el item (null = visible para cualquier usuario logueado)
 const SECCIONES = [
   { titulo: 'Operación', items: [
-    { path: '/admin/dashboard',      label: 'Dashboard', requiere: null },
-    { path: '/admin/sitios',         label: 'Pedidos y sitios', requiere: 'pedidos.ver' },
-    { path: '/admin/arbol',          label: 'Árbol de reservaciones', requiere: 'reservaciones.ver' },
-    { path: '/admin/preasignacion',  label: 'Pre-asignación', requiere: 'reservaciones.ver' },
-    { path: '/admin/asistencia',     label: 'Confirmación asistencia', requiere: 'checador.ver' },
-    { path: '/admin/checador',       label: 'Checador biométrico', requiere: 'checador.ver' },
-    { path: '/admin/nomina',         label: 'Nómina', requiere: 'nomina.ver' }
+    { path: '/admin/dashboard',      label: 'Dashboard', icono: '📊', requiere: null },
+    { path: '/admin/sitios',         label: 'Pedidos y sitios', icono: '📦', requiere: 'pedidos.ver' },
+    { path: '/admin/arbol',          label: 'Árbol de reservaciones', icono: '🌳', requiere: 'reservaciones.ver' },
+    { path: '/admin/preasignacion',  label: 'Pre-asignación', icono: '🧩', requiere: 'reservaciones.ver' },
+    { path: '/admin/asistencia',     label: 'Confirmación asistencia', icono: '✅', requiere: 'checador.ver' },
+    { path: '/admin/checador',       label: 'Checador biométrico', icono: '👆', requiere: 'checador.ver' },
+    { path: '/admin/nomina',         label: 'Nómina', icono: '💰', requiere: 'nomina.ver' }
   ]},
   { titulo: 'Comercial', items: [
-    { path: '/admin/requisiciones', label: 'Requisiciones de personal', requiere: 'requisiciones.ver' },
-    { path: '/admin/facturacion',   label: 'Facturación', requiere: 'facturacion.ver' }
+    { path: '/admin/requisiciones', label: 'Requisiciones de personal', icono: '🧾', requiere: 'requisiciones.ver' },
+    { path: '/admin/facturacion',   label: 'Facturación', icono: '🧮', requiere: 'facturacion.ver' }
   ]},
   { titulo: 'Reclutamiento', items: [
-    { path: '/admin/personal',                label: 'Empleados y candidatos', requiere: 'empleados.ver' },
-    { path: '/admin/funnel',                  label: 'Funnel de selección', requiere: 'vacantes.ver' },
-    { path: '/admin/calendario-entrevistas',  label: 'Calendario entrevistas', requiere: 'candidatos.ver' },
-    { path: '/admin/entrevista-grupal',       label: 'Asistencia por grupos', requiere: 'candidatos.editar' },
-    { path: '/admin/firma-contratos',         label: 'Firma de contratos', requiere: 'candidatos.editar' },
-    { path: '/admin/curso-induccion',         label: 'Cursos de inducción', requiere: 'candidatos.editar' },
-    { path: '/admin/alta-masiva',             label: 'Alta masiva empleados', requiere: 'empleados.crear' }
+    { path: '/admin/personal',                label: 'Empleados y candidatos', icono: '👥', requiere: 'empleados.ver' },
+    { path: '/admin/funnel',                  label: 'Funnel de selección', icono: '🎯', requiere: 'vacantes.ver' },
+    { path: '/admin/calendario-entrevistas',  label: 'Calendario entrevistas', icono: '📅', requiere: 'candidatos.ver' },
+    { path: '/admin/entrevista-grupal',       label: 'Asistencia por grupos', icono: '🙋', requiere: 'candidatos.editar' },
+    { path: '/admin/firma-contratos',         label: 'Firma de contratos', icono: '✍️', requiere: 'candidatos.editar' },
+    { path: '/admin/curso-induccion',         label: 'Cursos de inducción', icono: '🎓', requiere: 'candidatos.editar' },
+    { path: '/admin/alta-masiva',             label: 'Alta masiva empleados', icono: '📥', requiere: 'empleados.crear' }
   ]},
   { titulo: 'Analítica', items: [
-    { path: '/admin/dw',            label: 'Data Warehouse', requiere: 'reportes.ver' }
+    { path: '/admin/dw',            label: 'Data Warehouse', icono: '📈', requiere: 'reportes.ver' }
   ]},
   { titulo: 'Administración', items: [
-    { path: '/admin/catalogos',     label: 'Catálogos (HU 9.01)', requiere: 'catalogos.ver' },
-    { path: '/admin/usuarios',      label: 'Usuarios y roles (HU 9.03)', requiere: 'usuarios.ver' },
-    { path: '/admin/config',        label: 'Configuración', requiere: null },
-    { path: '/admin/suscripcion',   label: 'Mi suscripción', requiere: null },
-    { path: '/admin/pricing',       label: 'Pricing público', requiere: null }
+    { path: '/admin/catalogos',     label: 'Catálogos (HU 9.01)', icono: '📚', requiere: 'catalogos.ver' },
+    { path: '/admin/usuarios',      label: 'Usuarios y roles (HU 9.03)', icono: '🔐', requiere: 'usuarios.ver' },
+    { path: '/admin/config',        label: 'Configuración', icono: '⚙️', requiere: null },
+    { path: '/admin/suscripcion',   label: 'Mi suscripción', icono: '💳', requiere: null },
+    { path: '/admin/pricing',       label: 'Pricing público', icono: '🏷️', requiere: null }
   ]},
   { titulo: 'Soporte / Dev', items: [
-    { path: '/admin/utilerias',     label: 'Utilerías (explorador)', requiere: 'usuarios.ver' },
-    { path: '/admin/bitacora',      label: 'Bitácora de accesos', requiere: 'usuarios.ver' }
+    { path: '/admin/utilerias',     label: 'Utilerías (explorador)', icono: '🛠️', requiere: 'usuarios.ver' },
+    { path: '/admin/bitacora',      label: 'Bitácora de accesos', icono: '📜', requiere: 'usuarios.ver' }
   ]}
 ];
 
@@ -81,13 +81,13 @@ export default function AdminShell() {
                 to={it.path}
                 className={({ isActive }) => 'nav-link' + (isActive ? ' active' : '')}
                 onClick={() => setOpenMobile(false)}
-              >{it.label}</NavLink>
+              ><span className="nav-icon">{it.icono}</span>{it.label}</NavLink>
             ))}
           </React.Fragment>
         ))}
         <div className="nav-section">Otros portales</div>
-        <NavLink to="/vacantes" className="nav-link">→ Portal público</NavLink>
-        <NavLink to="/portal" className="nav-link">→ Portal freelance</NavLink>
+        <NavLink to="/vacantes" className="nav-link"><span className="nav-icon">🌐</span>Portal público</NavLink>
+        <NavLink to="/portal" className="nav-link"><span className="nav-icon">🧑‍💼</span>Portal freelance</NavLink>
       </aside>
       <div className={'sidebar-scrim' + (openMobile ? ' open' : '')} onClick={() => setOpenMobile(false)} />
       <main className="app-content">
