@@ -95,7 +95,7 @@ export default function AltaMasivaEmpleados() {
           <tbody>
             {candidatos.length === 0 && (
               <tr><td colSpan="7" className="empty">
-                Sin candidatos listos. Los candidatos aparecen aquí cuando marcaste su asistencia a inducción en el funnel de reclutamiento.
+                Sin candidatos listos. Normalmente no hace falta usar esta pantalla: confirmar asistencia en "Cursos de inducción" ya promueve automáticamente. Esta queda como respaldo manual para casos sueltos.
               </td></tr>
             )}
             {candidatos.map(c => (

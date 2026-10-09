@@ -7,13 +7,22 @@ import KpiCard from '../../components/ui/KpiCard.jsx';
 import { useModuleAudit, logAccion } from '../../lib/audit.js';
 
 // HU 2.04 — Pre-asignación de personal
-// Elige un pedido_detalle y le asigna empleados (preasignación normal o forzada)
+// Elige un pedido_detalle y le asigna empleados (preasignación normal o forzada).
+// "Buscar cualquier empleado" replica el campo libre "Nombre completo / Alias"
+// del legado (Detalles de pedido ▸ pestaña Reservaciones): permite intentar
+// Confirmación Forzada/Preasignada sobre alguien sin esa plaza exacta — es la
+// única forma de probar el Escenario 12 (Productos similares), donde el
+// backend decide si acepta según tr_producto_puesto/tr_productos_similares y
+// el flag "Completar con similares" del detalle (ver Migración 020).
 export default function Preasignacion() {
   useModuleAudit('preasignacion');
   const [detalles, setDetalles] = useState([]);
   const [selDetalle, setSelDetalle] = useState(null);
   const [disponibles, setDisponibles] = useState([]);
   const [reservados, setReservados] = useState([]);
+  const [busqueda, setBusqueda] = useState('');
+  const [resultadosBusqueda, setResultadosBusqueda] = useState([]);
+  const [buscando, setBuscando] = useState(false);
   const [modalOpen, setModalOpen] = useState(false);
   const [empSel, setEmpSel] = useState(null);
   const [tipoAsig, setTipoAsig] = useState('preasignado');
@@ -21,13 +30,14 @@ export default function Preasignacion() {
 
   useEffect(() => {
     if (!supabaseReady) return;
-    supabase.from('te_pedidos_detalle').select('*, tc_puestos(titulo), te_pedidos(folio, titulo, sitio_id, fecha_evento)')
+    supabase.from('te_pedidos_detalle').select('*, tc_puestos(titulo), tc_productos(titulo), te_pedidos(folio, titulo, sitio_id, fecha_evento)')
       .in('status_detalle', ['borrador','liberado']).order('fecha_cita').limit(50)
       .then(({ data }) => setDetalles(data || []));
   }, []);
 
   const cargarDetalle = async (d) => {
     setSelDetalle(d);
+    setBusqueda(''); setResultadosBusqueda([]);
     const [{ data: emp }, { data: res }] = await Promise.all([
       supabase.from('tr_empleado_plaza')
         .select('empleado_id, porcentaje_puntualidad, te_empleados(id, folio, nombres, apellido_paterno, activo)')
@@ -40,6 +50,25 @@ export default function Preasignacion() {
     const yaReservados = new Set((res || []).filter(r => r.estado !== 'cancelado').map(r => r.empleado_id));
     setDisponibles(activos.filter(e => !yaReservados.has(e.empleado_id)));
     setReservados(res || []);
+  };
+
+  const buscarEmpleado = async (texto) => {
+    setBusqueda(texto);
+    if (!texto || texto.length < 2) { setResultadosBusqueda([]); return; }
+    setBuscando(true);
+    const { data } = await supabase.from('te_empleados')
+      .select('id, folio, nombres, apellido_paterno, apellido_materno')
+      .eq('tenant_id', DEMO_TENANT_ID).eq('activo', true)
+      .or(`nombres.ilike.%${texto}%,apellido_paterno.ilike.%${texto}%,apellido_materno.ilike.%${texto}%`)
+      .limit(10);
+    setResultadosBusqueda(data || []);
+    setBuscando(false);
+  };
+
+  const abrirModal = (empleado_id, tipo) => {
+    setEmpSel({ empleado_id, desdeBusquedaLibre: true, te_empleados: resultadosBusqueda.find(e => e.id === empleado_id) });
+    setTipoAsig(tipo);
+    setModalOpen(true);
   };
 
   const asignar = async () => {
@@ -58,10 +87,14 @@ export default function Preasignacion() {
       cita_fin: cita_f.toISOString(),
       regla_aplicada: `preasignacion_manual_${tipoAsig}`
     });
-    if (error) { setMsg('❌ ' + error.message); return; }
+    if (error) {
+      // El backend manda el texto exacto a replicar (ej. legado: "El empleado no cumple con el perfil requerido")
+      setMsg('❌ ' + (error.message || 'No se pudo completar la asignación.'));
+      return;
+    }
     await logAccion('preasignacion', 'ASIGNAR', `emp ${empSel.empleado_id} → detalle ${selDetalle.id} (${tipoAsig})`);
-    setMsg(`✓ ${tipoAsig === 'forzada' ? 'Forzada' : 'Preasignación'} creada`);
-    setModalOpen(false); setEmpSel(null);
+    setMsg(`✓ ${tipoAsig === 'forzada' ? 'Confirmación Forzada' : 'Confirmación Preasignada'} creada`);
+    setModalOpen(false); setEmpSel(null); setBusqueda(''); setResultadosBusqueda([]);
     cargarDetalle(selDetalle);
   };
 
@@ -70,7 +103,7 @@ export default function Preasignacion() {
     const { error } = await supabase.from('te_reservaciones').update({ estado: 'cancelado' }).eq('id', r.id);
     if (error) { setMsg('❌ ' + error.message); return; }
     await logAccion('preasignacion', 'CANCELAR', `reservacion ${r.id}`);
-    setMsg('✓ Cancelada');
+    setMsg('✓ Reservación cancelada');
     cargarDetalle(selDetalle);
   };
 
@@ -79,7 +112,7 @@ export default function Preasignacion() {
       <div className="section-eyebrow">Operación · HU 2.04</div>
       <h1>Pre-asignación de personal</h1>
       <p style={{ color: 'var(--muted)', marginBottom: 20 }}>
-        Elegí un detalle de pedido, mira los empleados con esa plaza y asignalos (preasignación normal o forzada).
+        Elegí un detalle de pedido. "Empleados con plaza disponible" filtra por el puesto exacto; "Buscar cualquier empleado" permite confirmar a alguien de otro puesto — el sistema decide si lo acepta.
       </p>
 
       {msg && <div className="card" style={{ padding: 10, marginBottom: 12, fontSize: 13 }}>{msg}</div>}
@@ -97,6 +130,7 @@ export default function Preasignacion() {
                 <div style={{ fontSize: 12, fontWeight: 700 }}>{d.tc_puestos?.titulo}</div>
                 <div style={{ fontSize: 11, color: 'var(--muted)' }}>#{d.te_pedidos?.folio} · {d.te_pedidos?.titulo}</div>
                 <div style={{ fontSize: 11, color: 'var(--muted)' }}>{d.te_pedidos?.fecha_evento} · Cant. {d.cantidad}</div>
+                {d.tc_productos?.titulo && <div style={{ fontSize: 11, color: 'var(--muted)' }}>Producto: {d.tc_productos.titulo}{d.completar_productos_similares ? ' · Completar con similares: SÍ' : ''}</div>}
                 <Badge estado={d.status_detalle === 'liberado' ? 'activo' : 'pendiente'}>{d.status_detalle}</Badge>
               </div>
             ))}
@@ -165,31 +199,61 @@ export default function Preasignacion() {
                           </Badge>
                         </td>
                         <td style={{ textAlign: 'right' }}>
-                          <button className="btn green sm" onClick={() => { setEmpSel(e); setTipoAsig('preasignado'); setModalOpen(true); }}>Preasignar</button>{' '}
-                          <button className="btn red sm" onClick={() => { setEmpSel(e); setTipoAsig('forzada'); setModalOpen(true); }}>Forzar</button>
+                          <button className="btn green sm" onClick={() => { setEmpSel(e); setTipoAsig('preasignado'); setModalOpen(true); }}>Confirmación Preasignada</button>{' '}
+                          <button className="btn red sm" onClick={() => { setEmpSel(e); setTipoAsig('forzada'); setModalOpen(true); }}>Confirmación Forzada</button>
                         </td>
                       </tr>
                     ))}
                   </tbody>
                 </table>
               </TablaWrap>
+
+              <h3>Buscar cualquier empleado</h3>
+              <div className="card" style={{ padding: 12, marginBottom: 12 }}>
+                <label className="label">Nombre completo / Alias</label>
+                <input className="field" placeholder="Escribí al menos 2 letras…" value={busqueda}
+                       onChange={e => buscarEmpleado(e.target.value)} />
+                {buscando && <p style={{ fontSize: 11, color: 'var(--muted)', marginTop: 6 }}>Buscando…</p>}
+              </div>
+              {resultadosBusqueda.length > 0 && (
+                <TablaWrap>
+                  <table>
+                    <thead><tr><th>Empleado</th><th></th></tr></thead>
+                    <tbody>
+                      {resultadosBusqueda.map(e => (
+                        <tr key={e.id}>
+                          <td>#{e.folio} {e.nombres} {e.apellido_paterno} {e.apellido_materno || ''}</td>
+                          <td style={{ textAlign: 'right' }}>
+                            <button className="btn green sm" onClick={() => abrirModal(e.id, 'preasignado')}>Confirmación Preasignada</button>{' '}
+                            <button className="btn red sm" onClick={() => abrirModal(e.id, 'forzada')}>Confirmación Forzada</button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </TablaWrap>
+              )}
             </>
           )}
         </div>
       </div>
 
-      <Modal open={modalOpen} onClose={() => setModalOpen(false)} title={`${tipoAsig === 'forzada' ? 'Confirmación forzada' : 'Preasignación'}`}
+      <Modal open={modalOpen} onClose={() => setModalOpen(false)} title={tipoAsig === 'forzada' ? 'Confirmación Forzada' : 'Confirmación Preasignada'}
         footer={<><button className="btn ghost" onClick={() => setModalOpen(false)}>Cancelar</button>
                 <button className={'btn ' + (tipoAsig === 'forzada' ? 'red' : 'green')} onClick={asignar}>Confirmar</button></>}>
         {empSel && (
           <div style={{ display: 'grid', gap: 10, fontSize: 13 }}>
-            <div><div className="label">Empleado</div><div>#{empSel.te_empleados?.folio} {empSel.te_empleados?.nombres} {empSel.te_empleados?.apellido_paterno}</div></div>
-            <div><div className="label">Puesto</div><div>{selDetalle?.tc_puestos?.titulo}</div></div>
-            <div><div className="label">Certeza</div><div>{empSel.porcentaje_puntualidad ? Math.round(empSel.porcentaje_puntualidad * 100) + '%' : 'Sin historial'}</div></div>
+            <div><div className="label">Empleado</div><div>
+              {empSel.te_empleados ? `#${empSel.te_empleados.folio} ${empSel.te_empleados.nombres} ${empSel.te_empleados.apellido_paterno}` : '—'}
+            </div></div>
+            <div><div className="label">Puesto requerido</div><div>{selDetalle?.tc_puestos?.titulo}</div></div>
+            {empSel.porcentaje_puntualidad !== undefined && (
+              <div><div className="label">Certeza</div><div>{empSel.porcentaje_puntualidad ? Math.round(empSel.porcentaje_puntualidad * 100) + '%' : 'Sin historial'}</div></div>
+            )}
             <div><div className="label">Tipo asignación</div>
               <Badge estado={tipoAsig === 'forzada' ? 'proceso' : 'pendiente'}>{tipoAsig.toUpperCase()}</Badge>
             </div>
-            {tipoAsig === 'forzada' && <p style={{ fontSize: 11, color: 'var(--red)' }}>⚠ La confirmación forzada bypassa la validación de certeza mínima del puesto.</p>}
+            {empSel.desdeBusquedaLibre && <p style={{ fontSize: 11, color: 'var(--muted)' }}>Este empleado se buscó por nombre y puede no tener la plaza exacta del puesto — el sistema validará si califica (directo, por catálogo de producto, o por "productos similares" si el detalle lo permite).</p>}
           </div>
         )}
       </Modal>

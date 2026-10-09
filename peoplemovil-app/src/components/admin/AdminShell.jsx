@@ -22,6 +22,9 @@ const SECCIONES = [
     { path: '/admin/personal',                label: 'Empleados y candidatos', requiere: 'empleados.ver' },
     { path: '/admin/funnel',                  label: 'Funnel de selección', requiere: 'vacantes.ver' },
     { path: '/admin/calendario-entrevistas',  label: 'Calendario entrevistas', requiere: 'candidatos.ver' },
+    { path: '/admin/entrevista-grupal',       label: 'Asistencia por grupos', requiere: 'candidatos.editar' },
+    { path: '/admin/firma-contratos',         label: 'Firma de contratos', requiere: 'candidatos.editar' },
+    { path: '/admin/curso-induccion',         label: 'Cursos de inducción', requiere: 'candidatos.editar' },
     { path: '/admin/alta-masiva',             label: 'Alta masiva empleados', requiere: 'empleados.crear' }
   ]},
   { titulo: 'Analítica', items: [

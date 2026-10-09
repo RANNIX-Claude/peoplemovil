@@ -27,6 +27,9 @@ import Preasignacion from './pages/admin/Preasignacion.jsx';
 import ConfirmacionAsistencia from './pages/admin/ConfirmacionAsistencia.jsx';
 import CalendarioEntrevistas from './pages/admin/CalendarioEntrevistas.jsx';
 import AltaMasivaEmpleados from './pages/admin/AltaMasivaEmpleados.jsx';
+import EntrevistaGrupal from './pages/admin/EntrevistaGrupal.jsx';
+import FirmaContratos from './pages/admin/FirmaContratos.jsx';
+import CursoInduccion from './pages/admin/CursoInduccion.jsx';
 
 // Portal público candidatos
 import PublicShell from './components/public/PublicShell.jsx';
@@ -64,6 +67,9 @@ export default function App() {
           <Route path="requisiciones" element={<Requisiciones />} />
           <Route path="funnel" element={<FunnelReclutamiento />} />
           <Route path="calendario-entrevistas" element={<CalendarioEntrevistas />} />
+          <Route path="entrevista-grupal" element={<EntrevistaGrupal />} />
+          <Route path="firma-contratos" element={<FirmaContratos />} />
+          <Route path="curso-induccion" element={<CursoInduccion />} />
           <Route path="alta-masiva" element={<AltaMasivaEmpleados />} />
           <Route path="facturacion" element={<Facturacion />} />
           <Route path="catalogos" element={<CatalogosAdmin />} />

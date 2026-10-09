@@ -5372,3 +5372,286 @@ SELECT e.tenant_id, e.id, e.id_puesto_principal, 0.95
 FROM te_empleados e
 WHERE e.tenant_id IN ('00000000-0000-0000-0000-000000000002','00000000-0000-0000-0000-000000000003','00000000-0000-0000-0000-000000000004')
   AND NOT EXISTS (SELECT 1 FROM tr_empleado_plaza p WHERE p.empleado_id = e.id);
+
+-- ============================================================================
+-- Migración 019 — Acciones de reclutamiento: grupo de entrevista, firma de
+-- contrato + curso de inducción, confirmación de asistencia a curso + alta
+-- automática. El funnel (tr_postulacion_candidato_vacante / FunnelReclutamiento.jsx)
+-- ya tenía el schema y las columnas desde la Migración 003b, pero no existía
+-- ninguna función que las mueva de una etapa a la siguiente -- analizado contra
+-- el video "Ciclo completo" del legado (ver NOTIFICACIONES_RECLUTAMIENTO.md):
+-- en el legado estas son 3 pantallas de acción separadas (Asistencia por
+-- Grupos, Firma de contratos, Cursos de inducción), cada una con su propio
+-- modal "Sí/No" de confirmación por lote. Las 2 funciones intermedias también
+-- son el punto donde el legado dispara sus 2 únicos correos de reclutamiento
+-- (el envío en sí queda del lado del frontend/Netlify Function, estas RPCs
+-- solo devuelven los datos que ese correo necesita).
+-- ============================================================================
+
+-- 1) Asistencia por Grupos: confirma ¿Asistió? + ¿Documentos completos? de un
+--    grupo de entrevista completo, en lote. Avanza la postulación a
+--    'entrevista_individual' solo si asistió Y trae documentos completos.
+CREATE OR REPLACE FUNCTION confirmar_asistencia_grupo(
+  p_grupo_cita_id uuid,
+  p_candidatos jsonb  -- [{"candidato_id":"...", "asistio":true, "doc_completa":true}, ...]
+) RETURNS int AS $$
+DECLARE
+  v_vacante uuid;
+  item jsonb;
+  n int := 0;
+BEGIN
+  SELECT vacante_publicacion_id INTO v_vacante FROM te_grupos_citas WHERE id = p_grupo_cita_id;
+  IF v_vacante IS NULL THEN RAISE EXCEPTION 'grupo de cita no existe'; END IF;
+
+  FOR item IN SELECT * FROM jsonb_array_elements(p_candidatos) LOOP
+    UPDATE tr_cita_grupo_candidato
+      SET asistio = (item->>'asistio')::boolean,
+          doc_completa = (item->>'doc_completa')::boolean,
+          confirmado_en = now()
+      WHERE grupo_cita_id = p_grupo_cita_id AND candidato_id = (item->>'candidato_id')::uuid;
+
+    UPDATE tr_postulacion_candidato_vacante
+      SET asis_recepcion = (item->>'asistio')::boolean,
+          doc_completa   = (item->>'doc_completa')::boolean,
+          estatus_full   = CASE WHEN (item->>'asistio')::boolean AND (item->>'doc_completa')::boolean
+                                 THEN 'entrevista_individual'::estado_postulacion_full_enum
+                                 ELSE estatus_full END
+      WHERE vacante_id = v_vacante AND candidato_id = (item->>'candidato_id')::uuid;
+    n := n + 1;
+  END LOOP;
+  RETURN n;
+END $$ LANGUAGE plpgsql;
+GRANT EXECUTE ON FUNCTION confirmar_asistencia_grupo(uuid, jsonb) TO authenticated;
+
+-- 2) Firma de contratos: captura Resultado por candidato y, si es
+--    'aceptado_curso', asigna el curso de inducción (equivalente al selector
+--    de cabecera que propaga a todas las filas en el legado) y pre-inscribe
+--    en tr_asistencia_curso. Devuelve los datos para el correo de
+--    confirmación de curso -- uno por candidato, personalizado (confirmado
+--    por captura de Outlook: "Estimado(a): <nombre>", no es un correo grupal).
+CREATE OR REPLACE FUNCTION registrar_firma_contrato(
+  p_candidatos uuid[],
+  p_resultado resultado_postulacion_enum,
+  p_curso_induccion_id uuid DEFAULT NULL
+) RETURNS TABLE (
+  candidato_id uuid, nombres text, apellido_paterno text, apellido_materno text,
+  correo text, curso_titulo text, curso_fecha date, curso_hora time, curso_lugar text
+) AS $$
+DECLARE cid uuid;
+BEGIN
+  IF p_resultado = 'aceptado_curso' AND p_curso_induccion_id IS NULL THEN
+    RAISE EXCEPTION 'Falta asignar el curso de inducción para aceptar candidatos';
+  END IF;
+
+  FOREACH cid IN ARRAY p_candidatos LOOP
+    IF p_resultado = 'aceptado_curso' THEN
+      UPDATE tr_postulacion_candidato_vacante
+        SET resultado = p_resultado, estatus_full = 'en_curso_induccion', curso_induccion_id = p_curso_induccion_id
+        WHERE tr_postulacion_candidato_vacante.candidato_id = cid
+          AND estatus_full NOT IN ('en_curso_induccion','en_evento_prueba','listo_alta','promovido');
+
+      INSERT INTO tr_asistencia_curso (tenant_id, curso_id, candidato_id)
+        SELECT tenant_id, p_curso_induccion_id, cid FROM te_candidatos WHERE id = cid
+        ON CONFLICT (tenant_id, curso_id, candidato_id) DO NOTHING;
+    ELSE
+      UPDATE tr_postulacion_candidato_vacante
+        SET resultado = p_resultado, estatus_full = 'rechazado'
+        WHERE tr_postulacion_candidato_vacante.candidato_id = cid;
+    END IF;
+  END LOOP;
+
+  RETURN QUERY
+    SELECT c.id, c.nombres, c.apellido_paterno, c.apellido_materno, c.correo,
+           ci.titulo, ci.fecha, ci.hora_inicio, s.direccion
+    FROM te_candidatos c
+    LEFT JOIN te_cursos_induccion ci ON ci.id = p_curso_induccion_id
+    LEFT JOIN tc_sitios s ON s.id = ci.sitio_id
+    WHERE c.id = ANY(p_candidatos) AND p_resultado = 'aceptado_curso';
+END $$ LANGUAGE plpgsql;
+GRANT EXECUTE ON FUNCTION registrar_firma_contrato(uuid[], resultado_postulacion_enum, uuid) TO authenticated;
+
+-- 3) Cursos de inducción: confirma ¿Asistió? por candidato y, si asistió,
+--    marca te_candidatos.paso_induccion y llama automáticamente a
+--    promover_candidato_a_empleado() en la misma operación -- en el legado,
+--    confirmar asistencia al curso es lo que dispara el alta sin botón
+--    aparte (hoy en PeopleMovil ese alta era un botón manual separado en
+--    Personal.jsx/AltaMasivaEmpleados.jsx). Devuelve una fila por candidato
+--    con el resultado de la promoción, para armar el correo-lote a RH con el
+--    PDF de altas (puede repetirse varias veces al día, una vez por cada
+--    lote confirmado -- confirmado contra la bandeja de Outlook del legado).
+CREATE OR REPLACE FUNCTION confirmar_asistencia_curso(
+  p_curso_induccion_id uuid,
+  p_candidatos jsonb  -- [{"candidato_id":"...", "asistio":true, "evento_prueba_id":null}, ...]
+) RETURNS TABLE (
+  candidato_id uuid, empleado_id uuid, folio int, nombres text, apellido_paterno text,
+  apellido_materno text, puesto text, ok boolean, mensaje text
+) AS $$
+DECLARE item jsonb; cid uuid; asis boolean; evid uuid; nuevo_emp uuid;
+BEGIN
+  FOR item IN SELECT * FROM jsonb_array_elements(p_candidatos) LOOP
+    cid  := (item->>'candidato_id')::uuid;
+    asis := (item->>'asistio')::boolean;
+    evid := NULLIF(item->>'evento_prueba_id','')::uuid;
+    nuevo_emp := NULL;
+
+    UPDATE tr_asistencia_curso SET asistio = asis
+      WHERE curso_id = p_curso_induccion_id AND tr_asistencia_curso.candidato_id = cid;
+
+    UPDATE tr_postulacion_candidato_vacante
+      SET asis_curso_induccion = asis,
+          evento_prueba_id = COALESCE(evid, evento_prueba_id),
+          estatus_full = CASE WHEN asis THEN 'listo_alta'::estado_postulacion_full_enum ELSE estatus_full END
+      WHERE tr_postulacion_candidato_vacante.candidato_id = cid
+        AND curso_induccion_id = p_curso_induccion_id;
+
+    IF asis THEN
+      UPDATE te_candidatos SET paso_induccion = true WHERE id = cid;
+      BEGIN
+        nuevo_emp := promover_candidato_a_empleado(cid);
+      EXCEPTION WHEN OTHERS THEN
+        nuevo_emp := NULL;
+      END;
+    END IF;
+
+    RETURN QUERY
+      SELECT c.id, e.id, e.folio, c.nombres, c.apellido_paterno, c.apellido_materno,
+             pu.titulo,
+             (nuevo_emp IS NOT NULL OR NOT asis),
+             CASE WHEN NOT asis THEN 'sin asistencia'
+                  WHEN nuevo_emp IS NOT NULL THEN 'alta ok'
+                  ELSE 'error al promover a empleado' END
+      FROM te_candidatos c
+      LEFT JOIN te_empleados e ON e.id = nuevo_emp
+      LEFT JOIN tr_postulacion_candidato_vacante p ON p.candidato_id = c.id AND p.curso_induccion_id = p_curso_induccion_id
+      LEFT JOIN te_vacantes vac ON vac.id = p.vacante_id
+      LEFT JOIN tc_puestos pu ON pu.id = vac.puesto_id
+      WHERE c.id = cid;
+  END LOOP;
+END $$ LANGUAGE plpgsql;
+GRANT EXECUTE ON FUNCTION confirmar_asistencia_curso(uuid, jsonb) TO authenticated;
+
+-- ============================================================================
+-- Migración 020 — Productos similares en Confirmación Forzada/Preasignada
+-- (Escenario 12 del QA legado, ver documentacion-referencia/SCREENSHOTS_ESCENARIO12.md)
+-- ============================================================================
+-- Hallazgo: `te_pedidos_detalle.completar_productos_similares`,
+-- `tr_producto_puesto` y `tr_productos_similares`/`tr_puestos_similares` ya
+-- existían en el schema (Migración 003b y vecinas) pero NADA los leía. El
+-- trigger `tg_reservacion_valida` validaba certeza/sexo contra el puesto
+-- exacto del detalle, pero `obtener_certeza_puesto()` cae a
+-- `tc_puestos.porcentaje_certeza_inicial` cuando el empleado no tiene esa
+-- plaza -- es decir, en la práctica NO bloqueaba a un empleado de puesto
+-- distinto (el problema real no era "bloquea de más", era "no bloquea nada").
+--
+-- Esta migración agrega la cadena de resolución que describe el QA:
+-- puesto exacto del detalle -> catálogo producto->puestos aceptados
+-- (tr_producto_puesto) -> si "completar_productos_similares"=SÍ ->
+-- puesto similar directo (tr_puestos_similares) o producto similar ->
+-- sus puestos aceptados (tr_productos_similares + tr_producto_puesto).
+-- Si ninguna rama aplica, bloquea con el mensaje EXACTO observado en el
+-- video legado: "El empleado no cumple con el perfil requerido".
+--
+-- Probado end-to-end en vivo (2026-10-08): pedido #193 "Escenario 12 -
+-- Productos similares", bloqueado con similares=NO, permitido con
+-- similares=SÍ, usando un empleado freelance con plaza única "Control de
+-- Accesos" sobre un detalle de producto "Seguridad" -- queda como dato de
+-- ejemplo en la base, no se borró.
+-- ============================================================================
+
+CREATE OR REPLACE FUNCTION puesto_aceptado_por_detalle(p_pedido_detalle_id uuid, p_puesto_empleado uuid)
+RETURNS boolean AS $$
+DECLARE d te_pedidos_detalle;
+BEGIN
+  SELECT * INTO d FROM te_pedidos_detalle WHERE id = p_pedido_detalle_id;
+  IF d.id IS NULL THEN RETURN false; END IF;
+
+  -- match exacto contra el puesto requerido por el detalle
+  IF p_puesto_empleado = d.puesto_id THEN RETURN true; END IF;
+
+  -- catálogo: puestos aceptados directos del producto del detalle (sin necesidad de "similares")
+  IF d.producto_id IS NOT NULL AND EXISTS (
+    SELECT 1 FROM tr_producto_puesto WHERE producto_id = d.producto_id AND puesto_id = p_puesto_empleado
+  ) THEN RETURN true; END IF;
+
+  IF NOT d.completar_productos_similares THEN RETURN false; END IF;
+
+  -- puesto similar directo (respeta el flag bidireccional de cada fila)
+  IF EXISTS (
+    SELECT 1 FROM tr_puestos_similares
+    WHERE (puesto_id = d.puesto_id AND puesto_similar_id = p_puesto_empleado)
+       OR (puesto_similar_id = d.puesto_id AND puesto_id = p_puesto_empleado AND bidireccional)
+  ) THEN RETURN true; END IF;
+
+  -- producto similar -> sus puestos aceptados vía tr_producto_puesto
+  IF d.producto_id IS NOT NULL AND EXISTS (
+    SELECT 1 FROM tr_productos_similares ps
+    JOIN tr_producto_puesto pp ON pp.puesto_id = p_puesto_empleado
+    WHERE (ps.producto_id = d.producto_id AND ps.producto_similar_id = pp.producto_id)
+       OR (ps.producto_similar_id = d.producto_id AND ps.producto_id = pp.producto_id AND ps.bidireccional)
+  ) THEN RETURN true; END IF;
+
+  RETURN false;
+END $$ LANGUAGE plpgsql STABLE;
+
+CREATE OR REPLACE FUNCTION tg_reservacion_valida() RETURNS trigger AS $$
+DECLARE v record; v_puesto_check uuid;
+BEGIN
+  PERFORM verificar_limite(NEW.tenant_id,'asignacion');
+
+  v_puesto_check := NEW.puesto_id;
+
+  IF NEW.pedido_detalle_id IS NOT NULL THEN
+    SELECT ep.puesto_id INTO v_puesto_check
+    FROM tr_empleado_plaza ep
+    WHERE ep.empleado_id = NEW.empleado_id AND ep.activo
+      AND puesto_aceptado_por_detalle(NEW.pedido_detalle_id, ep.puesto_id)
+    ORDER BY (ep.puesto_id = NEW.puesto_id) DESC
+    LIMIT 1;
+
+    IF v_puesto_check IS NULL THEN
+      NEW.regla_aplicada := 'PRC_ProductosSimilares: perfil no requerido';
+      RAISE EXCEPTION 'El empleado no cumple con el perfil requerido';
+    END IF;
+  END IF;
+
+  SELECT * INTO v FROM valida_emp_puesto(NEW.empleado_id, v_puesto_check);
+  IF NOT v.valido THEN NEW.regla_aplicada := 'PRC_ValidaEmpPuesto: '||v.motivo;
+    RAISE EXCEPTION 'Empleado no califica: %', v.motivo; END IF;
+  SELECT * INTO v FROM valida_no_empalme(NEW.empleado_id, NEW.puesto_id, NEW.cita_inicio, NEW.cita_fin);
+  IF NOT v.valido THEN NEW.regla_aplicada := 'PRC_Noempalmereservacion: '||v.motivo;
+    RAISE EXCEPTION 'Traslape: %', v.motivo; END IF;
+  NEW.regla_aplicada := 'reservacion_creada_ok';
+  RETURN NEW;
+END $$ LANGUAGE plpgsql;
+
+-- ----------------------------------------------------------------------------
+-- Catálogo: completa tr_producto_puesto desde tc_productos.id_puesto ya
+-- existente (es_principal=true), para todos los tenants -- dato real de
+-- catálogo, no solo fixture de prueba.
+-- ----------------------------------------------------------------------------
+INSERT INTO tr_producto_puesto (tenant_id, producto_id, puesto_id, es_principal)
+SELECT tenant_id, id, id_puesto, true
+FROM tc_productos
+WHERE id_puesto IS NOT NULL
+ON CONFLICT (tenant_id, producto_id, puesto_id) DO NOTHING;
+
+-- ----------------------------------------------------------------------------
+-- Catálogo: "Control de Accesos" como producto similar de "Seguridad" en el
+-- tenant demo de eventos -- es el par exacto que demuestra el video del
+-- Escenario 12 (empleado 58172 "Oscar Fernández Plata" con plaza única
+-- Control de Accesos, aceptado en un detalle de producto Seguridad-IN solo
+-- cuando "Completar con similares"=SÍ).
+-- ----------------------------------------------------------------------------
+INSERT INTO tr_productos_similares (tenant_id, producto_id, producto_similar_id, bidireccional)
+SELECT '00000000-0000-0000-0000-000000000001', seg.id, cda.id, true
+FROM tc_productos seg, tc_productos cda
+WHERE seg.tenant_id = '00000000-0000-0000-0000-000000000001' AND seg.titulo = 'Seguridad' AND seg.subcategoria = 'Masculino'
+  AND cda.tenant_id = '00000000-0000-0000-0000-000000000001' AND cda.titulo = 'Control de Accesos' AND cda.subcategoria = 'Masculino'
+ON CONFLICT (tenant_id, producto_id, producto_similar_id) DO NOTHING;
+
+INSERT INTO tr_productos_similares (tenant_id, producto_id, producto_similar_id, bidireccional)
+SELECT '00000000-0000-0000-0000-000000000001', seg.id, cda.id, true
+FROM tc_productos seg, tc_productos cda
+WHERE seg.tenant_id = '00000000-0000-0000-0000-000000000001' AND seg.titulo = 'Seguridad' AND seg.subcategoria = 'Femenino'
+  AND cda.tenant_id = '00000000-0000-0000-0000-000000000001' AND cda.titulo = 'Control de Accesos' AND cda.subcategoria = 'Femenino'
+ON CONFLICT (tenant_id, producto_id, producto_similar_id) DO NOTHING;

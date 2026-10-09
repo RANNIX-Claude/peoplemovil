@@ -1,3 +1,5 @@
+**✅ Implementado y probado (2026-10-08, Migración 020)**: `puesto_aceptado_por_detalle()` + `tg_reservacion_valida()` ya replican la cadena de resolución y el mensaje exacto `"El empleado no cumple con el perfil requerido"`. Probado end-to-end en vivo contra la base real (pedido #193 "Escenario 12 - Productos similares", tenant eventos) — bloqueado con similares=NO, permitido con similares=SÍ. `Preasignacion.jsx` ahora tiene un buscador libre de empleados (antes solo listaba por plaza exacta, por lo que el escenario ni se podía intentar). Ver `CLAUDE.md` §7 (Migración 020) y `db/reset_database.sql`. Pendiente menor: no existe todavía una pantalla "Modificar detalle" para editar `completar_productos_similares` después de creado (se hizo por SQL directo en la prueba); el alta inicial del detalle sí lo captura (`SitiosAsignacion.jsx`).
+
 # Escenario 12 — Productos similares (walkthrough visual)
 
 Fuente: 95 capturas de pantalla extraídas cuadro a cuadro del video QA
