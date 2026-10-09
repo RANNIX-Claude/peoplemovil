@@ -6287,3 +6287,132 @@ FROM numerados n
 WHERE n.id = e.id;
 
 -- ============================================================================
+-- Migración 027 -- Backlog de funcionalidad (2026-10-09, pedido explícito del
+-- usuario tras ver el inventario hecho/pendiente por portal: "esto lo vamos a
+-- dar seguimiento, agrégalo como una opción en el mismo menú... vamos a poder
+-- tener identificado el problema, subir imágenes, una explicación, el estatus
+-- va a ser pendiente/en proceso/atendido... asociarlos a grupos como Sprint 1,
+-- 2, 3"). Mismo patrón tenant-scoped + RLS que el resto del esquema (D6) --
+-- NO se trató como tabla global pese a ser una herramienta "interna de
+-- desarrollo", a propósito: ver memoria de sesión sobre aislamiento
+-- multi-tenant como prioridad de producto. Reutiliza tg_auditoria() (ya
+-- resuelve tenant_id/creado_por/modificado_por solo) y el mismo patrón de
+-- bucket privado con convención {tenant_id}/{item_id}/archivo que
+-- "expedientes" (Migración 024).
+-- ============================================================================
+
+-- ---------------------------------------------------------------------------
+-- 1. Hallazgos de funcionalidad (uno por pantalla/función con pendiente)
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS te_backlog_items (
+  id            uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  tenant_id     uuid NOT NULL REFERENCES te_tenants(id) ON DELETE CASCADE,
+  portal        text NOT NULL CHECK (portal IN ('admin','freelance','publico','backend')),
+  grupo         text NOT NULL,     -- mismo agrupamiento que el menú real (Operación, Comercial, Reclutamiento...)
+  titulo        text NOT NULL,
+  ruta          text,              -- pantalla/archivo de referencia, p.ej. '/admin/checador'
+  descripcion   text,              -- observaciones -- se va enriqueciendo con el tiempo, no es de una sola vez
+  estado        text NOT NULL DEFAULT 'pendiente' CHECK (estado IN ('pendiente','en_proceso','atendido')),
+  sprint        text,              -- libre ("Sprint 1"...); NULL = backlog general sin paquete asignado todavía
+  orden         int NOT NULL DEFAULT 0,
+  creado_en timestamptz NOT NULL DEFAULT now(), creado_por uuid,
+  modificado_en timestamptz NOT NULL DEFAULT now(), modificado_por uuid
+);
+CREATE INDEX IF NOT EXISTS ix_backlog_tenant ON te_backlog_items(tenant_id, estado);
+CREATE INDEX IF NOT EXISTS ix_backlog_sprint ON te_backlog_items(tenant_id, sprint);
+DROP TRIGGER IF EXISTS tg_aud_backlog ON te_backlog_items;
+CREATE TRIGGER tg_aud_backlog BEFORE INSERT OR UPDATE ON te_backlog_items FOR EACH ROW EXECUTE FUNCTION tg_auditoria();
+
+-- ---------------------------------------------------------------------------
+-- 2. Imágenes de evidencia por hallazgo (N por item, orden de subida)
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS te_backlog_imagenes (
+  id            uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  tenant_id     uuid NOT NULL REFERENCES te_tenants(id) ON DELETE CASCADE,
+  item_id       uuid NOT NULL REFERENCES te_backlog_items(id) ON DELETE CASCADE,
+  storage_path  text NOT NULL,
+  subida_en timestamptz NOT NULL DEFAULT now(), subida_por uuid
+);
+CREATE INDEX IF NOT EXISTS ix_backlogimg_item ON te_backlog_imagenes(tenant_id, item_id);
+
+-- ---------------------------------------------------------------------------
+-- 3. RLS -- mismo patrón que el resto del esquema (tenant_id = current_tenant_id())
+-- ---------------------------------------------------------------------------
+DO $$
+DECLARE t text;
+BEGIN
+  FOREACH t IN ARRAY ARRAY['te_backlog_items','te_backlog_imagenes']
+  LOOP
+    EXECUTE format('ALTER TABLE %I ENABLE ROW LEVEL SECURITY', t);
+    EXECUTE format('DROP POLICY IF EXISTS p_%1$s_sel ON %1$s', t);
+    EXECUTE format('DROP POLICY IF EXISTS p_%1$s_ins ON %1$s', t);
+    EXECUTE format('DROP POLICY IF EXISTS p_%1$s_upd ON %1$s', t);
+    EXECUTE format('DROP POLICY IF EXISTS p_%1$s_del ON %1$s', t);
+    EXECUTE format('CREATE POLICY p_%1$s_sel ON %1$s FOR SELECT USING (tenant_id = current_tenant_id())', t);
+    EXECUTE format('CREATE POLICY p_%1$s_ins ON %1$s FOR INSERT WITH CHECK (tenant_id = current_tenant_id())', t);
+    EXECUTE format('CREATE POLICY p_%1$s_upd ON %1$s FOR UPDATE USING (tenant_id = current_tenant_id())', t);
+    EXECUTE format('CREATE POLICY p_%1$s_del ON %1$s FOR DELETE USING (tenant_id = current_tenant_id())', t);
+  END LOOP;
+END $$;
+
+-- ---------------------------------------------------------------------------
+-- 4. Storage -- bucket privado para evidencia (capturas de pantalla del
+--    problema). Convención de ruta: {tenant_id}/{item_id}/{archivo}
+-- ---------------------------------------------------------------------------
+INSERT INTO storage.buckets (id, name, public)
+VALUES ('backlog', 'backlog', false)
+ON CONFLICT (id) DO NOTHING;
+
+DROP POLICY IF EXISTS p_storage_backlog_sel ON storage.objects;
+DROP POLICY IF EXISTS p_storage_backlog_ins ON storage.objects;
+DROP POLICY IF EXISTS p_storage_backlog_upd ON storage.objects;
+DROP POLICY IF EXISTS p_storage_backlog_del ON storage.objects;
+
+CREATE POLICY p_storage_backlog_sel ON storage.objects FOR SELECT TO authenticated
+  USING (bucket_id = 'backlog' AND (storage.foldername(name))[1] = current_tenant_id()::text);
+CREATE POLICY p_storage_backlog_ins ON storage.objects FOR INSERT TO authenticated
+  WITH CHECK (bucket_id = 'backlog' AND (storage.foldername(name))[1] = current_tenant_id()::text);
+CREATE POLICY p_storage_backlog_upd ON storage.objects FOR UPDATE TO authenticated
+  USING (bucket_id = 'backlog' AND (storage.foldername(name))[1] = current_tenant_id()::text);
+CREATE POLICY p_storage_backlog_del ON storage.objects FOR DELETE TO authenticated
+  USING (bucket_id = 'backlog' AND (storage.foldername(name))[1] = current_tenant_id()::text);
+
+-- ---------------------------------------------------------------------------
+-- 5. Siembra -- los hallazgos ya identificados en el inventario de código del
+--    2026-10-09 (portal por portal), para que el backlog no arranque vacío.
+--    Todos en tenant eventos (DEMO_TENANT_ID), estado pendiente, sin sprint
+--    asignado todavía -- el usuario los irá moviendo a paquetes de trabajo.
+-- ---------------------------------------------------------------------------
+INSERT INTO te_backlog_items (tenant_id, portal, grupo, titulo, ruta, descripcion, estado, orden)
+SELECT '00000000-0000-0000-0000-000000000001', v.portal, v.grupo, v.titulo, v.ruta, v.descripcion, 'pendiente', v.orden
+FROM (VALUES
+  -- NOT EXISTS abajo: sembrar solo si la tabla está vacía (sin UNIQUE natural
+  -- contra el cual hacer ON CONFLICT -- evita duplicar si esta migración se
+  -- vuelve a aplicar por error sobre una base que ya tiene estos hallazgos,
+  -- o items propios que el usuario ya haya agregado).
+  ('admin', 'Operación',       'Dashboard: "Cobertura por sitio" nunca se llena',           '/admin/dashboard',           'El estado coberturas se declara pero ningún useEffect lo llena -- la sección siempre dice "Sin pedidos activos aún" aunque sí los haya.', 1),
+  ('admin', 'Operación',       'Falta pantalla "Modificar detalle" de un pedido',           '/admin/sitios',               'No hay forma de editar un renglón ya creado (p.ej. "completar productos similares") desde la UI -- hoy se cambia por SQL directo.', 2),
+  ('admin', 'Operación',       'Checador: consentimiento_id hardcodeado a UUID cero',       '/admin/checador',             'El checador manda siempre el UUID de ceros en vez de resolver el consentimiento vigente real del empleado. El trigger de base sí valida, pero el frontend no manda el dato correcto.', 3),
+  ('admin', 'Comercial',       'Requisiciones: folio generado en el navegador',             '/admin/requisiciones',        'Usa Date.now() % 100000 en vez de una función de folios consecutivos del servidor -- riesgo de colisión entre dos altas simultáneas.', 4),
+  ('admin', 'Comercial',       'Facturación es solo lectura',                               '/admin/facturacion',          'No hay alta de factura ni timbrado, pese a que existen los permisos facturacion.crear/aprobar -- nada los usa todavía.', 5),
+  ('admin', 'Administración',  'Usuarios y roles: solo diagnóstico, sin alta real',         '/admin/usuarios',             'No hay forma de crear roles, asignar permisos ni vincular una cuenta a mano, pese al nombre "Administración de Usuarios, Roles y Perfiles". Pide el permiso usuarios.ver, que no existe en el catálogo tc_permisos real -- ningún rol puede cumplirlo nunca.', 6),
+  ('admin', 'Administración',  'Mi suscripción es una simulación sin Stripe',               '/admin/suscripcion',          'El cambio de plan actualiza la base directo tras un confirm() del navegador -- no hay integración real con Stripe en esta pantalla todavía.', 7),
+  ('admin', 'Administración',  'Pricing público es solo presentación',                      '/admin/pricing',              'Planes FREE/PRO hardcodeados, botones sin acción -- página de marketing sin ninguna función real.', 8),
+  ('admin', 'Soporte / Dev',   'Utilerías pide un permiso que no existe',                   '/admin/utilerias',            'Pide usuarios.ver -- mismo problema que "Usuarios y roles": el código no está en tc_permisos.', 9),
+  ('admin', 'Soporte / Dev',   'Bitácora pide un permiso que no existe',                    '/admin/bitacora',             'Mismo bug de usuarios.ver que Utilerías y Usuarios y roles.', 10),
+  ('admin', 'Administración',  'RLS no valida permiso, solo tenant',                        null,                          'Un usuario autenticado puede, llamando la API de Supabase directo, escribir en cualquier tabla de su propio tenant aunque su rol no tenga el permiso correspondiente -- el gating de hasPermiso() es solo de interfaz.', 11),
+  ('admin', 'Administración',  'La ruta /admin/* no valida permiso, solo el menú lo oculta','RequireAdminAuth.jsx',       'Cualquier cuenta admin válida puede navegar directo a una URL como /admin/nomina aunque su rol no tenga nomina.ver.', 12),
+  ('admin', 'Administración',  'tc_permisos y tc_planes_suscripcion sin RLS',               null,                          'Ambas tablas quedan expuestas completas a cualquier cliente anon/authenticated. Reportado por el advisor de seguridad de Supabase, sin corregir -- requiere decidir las políticas antes de activar RLS.', 13),
+  ('admin', 'Operación',       'Tarifas matriciales sembradas pero no cableadas',           '/admin/sitios',               'tp_duraciones_evento / tp_sueldos_matriciales ya tienen datos reales del tabulador legado, pero ni matriz_puestos_pedido() ni el "Presupuesto por día" los usan todavía.', 14),
+  ('admin', 'Operación',       'tc_productos.id_puesto incompleto',                         '/admin/sitios',               '53 de 81 productos vinculados a su puesto. Sin ese vínculo, "Agregar detalle al pedido" falla con "Elegí un producto (define el puesto)".', 15),
+  ('freelance', 'Portal freelance', 'Sin penalización ni lista de espera al cancelar',      '/portal/mis-eventos',         'cancelar_mi_reservacion() respeta el flag existente de "permitir cancelar", pero no penaliza cancelaciones voluntarias ni notifica a quien quedó en lista de espera cuando se libera un lugar. Pendiente de decidir las reglas.', 1),
+  ('backend', 'Notificaciones', 'notificacion-resend depende de RESEND_API_KEY',            'netlify/functions/notificacion-resend.js', 'Pendiente confirmar que la key esté configurada en el sitio vigente de Netlify -- sin ella no sale ningún correo real.', 1),
+  ('backend', 'Notificaciones', 'notificacion-whatsapp depende de credenciales Twilio',     'netlify/functions/notificacion-whatsapp.js', 'Sin TWILIO_* responde en modo "dry" -- no manda nada de verdad.', 2),
+  ('backend', 'Notificaciones', 'digest-diario depende de las mismas keys',                 'netlify/functions/digest-diario.js', 'Mismo bloqueo que notificacion-resend/whatsapp -- sin esas keys el resumen diario no llega a nadie.', 3),
+  ('backend', 'Notificaciones', 'notif-publicar-detalle depende de las mismas keys',        'netlify/functions/notif-publicar-detalle.js', 'Mismo bloqueo de credenciales de notificación.', 4),
+  ('backend', 'Tenant y cobros', 'onboarding-tenant quedaría roto si se invoca',            'netlify/functions/onboarding-tenant.js', 'Usa nombres de tabla de un esquema anterior (tenants, suscripciones, cat_parametros_globales, avisos_privacidad) que ya no existen -- el esquema real usa te_tenants, te_suscripciones, tp_parametros_globales, tp_avisos_privacidad.', 5),
+  ('backend', 'Tenant y cobros', 'payments sin STRIPE_SECRET_KEY',                          'netlify/functions/payments.js', 'La lógica de Stripe Checkout/webhook ya está escrita, pero sin la key real responde en modo "dry" sin cobrar nada.', 6)
+) AS v(portal, grupo, titulo, ruta, descripcion, orden)
+WHERE NOT EXISTS (SELECT 1 FROM te_backlog_items);
+
+-- ============================================================================

@@ -39,7 +39,8 @@ const SECCIONES = [
   ]},
   { titulo: 'Soporte / Dev', items: [
     { path: '/admin/utilerias',     label: 'Utilerías (explorador)', icono: '🛠️', requiere: 'usuarios.ver' },
-    { path: '/admin/bitacora',      label: 'Bitácora de accesos', icono: '📜', requiere: 'usuarios.ver' }
+    { path: '/admin/bitacora',      label: 'Bitácora de accesos', icono: '📜', requiere: 'usuarios.ver' },
+    { path: '/admin/backlog',       label: 'Backlog de funcionalidad', icono: '🗒️', requiere: 'nomina.ver' }
   ]}
 ];
 

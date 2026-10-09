@@ -31,6 +31,7 @@ import ExpedienteEmpleado from './pages/admin/ExpedienteEmpleado.jsx';
 import EntrevistaGrupal from './pages/admin/EntrevistaGrupal.jsx';
 import FirmaContratos from './pages/admin/FirmaContratos.jsx';
 import CursoInduccion from './pages/admin/CursoInduccion.jsx';
+import BacklogFuncionalidad from './pages/admin/BacklogFuncionalidad.jsx';
 
 // Portal público candidatos
 import PublicShell from './components/public/PublicShell.jsx';
@@ -82,6 +83,7 @@ export default function App() {
           <Route path="suscripcion" element={<Suscripcion />} />
           <Route path="utilerias" element={<Utilerias />} />
           <Route path="bitacora" element={<Bitacora />} />
+          <Route path="backlog" element={<BacklogFuncionalidad />} />
         </Route>
 
         <Route path="/vacantes" element={<PublicShell />}>

@@ -33,3 +33,26 @@ export async function eliminarArchivoEmpleado(path) {
   if (!path || /^https?:\/\//i.test(path)) return; // no se borran URLs externas (demo)
   await supabase.storage.from(BUCKET).remove([path]);
 }
+
+// Bucket privado aparte (Migración 027) -- evidencia (capturas de pantalla)
+// del backlog de funcionalidad. Mismo patrón que arriba, bucket distinto.
+const BUCKET_BACKLOG = 'backlog';
+
+export async function subirImagenBacklog(tenantId, itemId, file) {
+  const path = `${tenantId}/${itemId}/${Date.now()}_${sanitizar(file.name)}`;
+  const { error } = await supabase.storage.from(BUCKET_BACKLOG).upload(path, file, { upsert: false, cacheControl: '3600' });
+  if (error) throw error;
+  return path;
+}
+
+export async function resolverUrlBacklog(path, segundos = 3600) {
+  if (!path) return null;
+  const { data, error } = await supabase.storage.from(BUCKET_BACKLOG).createSignedUrl(path, segundos);
+  if (error) return null;
+  return data.signedUrl;
+}
+
+export async function eliminarImagenBacklog(path) {
+  if (!path) return;
+  await supabase.storage.from(BUCKET_BACKLOG).remove([path]);
+}
