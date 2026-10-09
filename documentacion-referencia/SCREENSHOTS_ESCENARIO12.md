@@ -276,3 +276,35 @@ rojos no se llegaron a disparar en el recorrido muestreado).
 7. **Campo "Indicaciones especiales"** (textarea) coincide con la columna
    ya agregada `indicaciones_especiales text` — confirmado, sin acción
    necesaria.
+
+## 7. Bug confirmado por QA en el legado (video de regresión 2019-03-19)
+
+Video adicional revisado: `R20190319 Escenario 12` (`https://youtu.be/TZA4CV4aSRg`,
+2m23s, canal WJaJa VideoClips). No tiene transcripción de YouTube; se recorrió
+manualmente moviendo `video.currentTime` vía JS y tomando capturas en varios
+puntos. Contenido:
+
+1. **Hoja de control de QA** (`comentarios_freelance.xlsx`, captura de pantalla
+   dentro del propio video) — bitácora de bugs reportados por escenario (8 al
+   17), fecha 18-19/03/2019. La fila del Escenario 12 dice textual (celda H13):
+   > "Minuto 3:23: Al agregar el empleado sigue mostrando el error indicando
+   > que no cumple el perfil, **el cuál no es correcto en este caso**."
+2. El resto del video muestra el sistema real (`integramx-001-site2...`):
+   listado "Pedidos" → "Detalles de pedido" → pestaña Reservaciones con
+   "Personal Confirmado" (empleado "5401 - Oscar García Palacios",
+   botones "Confirmación Forzada"/"Confirmación Preasignada") → formulario
+   "Editar/Liberar/Cancelar Pedido" con el campo **"Completar con similares"**
+   visible — mismo patrón ya documentado en las secciones 1-6 de este archivo,
+   confirmado con datos de otra corrida de prueba.
+
+**Conclusión:** el propio QA de OCESA marcó como defecto que el mensaje
+`"El empleado no cumple con el perfil requerido"` aparecía **incorrectamente**
+en al menos un caso de este escenario (falso positivo) — es decir, el legado
+tenía un bug conocido y sin resolver en esta misma validación. La
+implementación de PeopleMovil (Migración 020, `puesto_aceptado_por_detalle()`)
+**no replica este bug**: se probó end-to-end el 2026-10-08 y bloquea/permite
+correctamente según corresponda. Decisión: no es necesario reproducir un
+defecto reconocido como tal por el QA original — la fidelidad máxima aplica a
+las reglas de negocio intencionales, no a bugs no resueltos. Si en el futuro
+se encuentra evidencia de que este "bug" en realidad escondía una regla de
+negocio válida no documentada, revisar este hallazgo de nuevo.
