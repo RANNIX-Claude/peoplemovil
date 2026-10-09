@@ -171,6 +171,50 @@ code, pre, .mono { font-family: 'JetBrains Mono', 'Consolas', 'Courier New', mon
   gap: 14px;
   margin-bottom: 20px;
 }
+
+/* Tarjeta de empleado (Personal.jsx, vista Mosaico) */
+.emp-grid { grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); }
+.emp-card {
+  background: var(--white);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 18px;
+  box-shadow: var(--card-sh);
+  cursor: pointer;
+  display: flex; flex-direction: column; gap: 12px;
+  transition: transform .14s, box-shadow .14s, border-color .14s;
+}
+.emp-card:hover {
+  transform: translateY(-3px);
+  box-shadow: 0 10px 28px rgba(0,0,0,.12);
+  border-color: var(--accent);
+}
+.emp-card-head { display: flex; align-items: center; gap: 10px; }
+.emp-card-id { flex: 1; min-width: 0; }
+.emp-card-name {
+  font-weight: 800; font-size: 14px; color: var(--text);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.emp-card-folio { font-size: 11px; color: var(--muted); }
+.emp-card-meta {
+  display: flex; flex-direction: column; gap: 4px;
+  font-size: 12px; color: var(--muted);
+}
+.emp-card-semaforos { display: flex; flex-direction: column; gap: 6px; }
+.emp-card-semaforos .semaforo-pct { width: 32px; text-align: right; }
+.emp-card-foot { display: flex; justify-content: flex-end; }
+.emp-card-tarifa {
+  display: inline-flex; align-items: center; gap: 4px;
+  font-size: 11px; font-weight: 800; padding: 4px 10px; border-radius: 99px;
+  background: var(--accent-tint); color: var(--gold-dark);
+}
+.emp-card-btn {
+  width: 100%;
+  background: var(--accent-tint2); color: var(--accent);
+  border: none; border-radius: 8px; padding: 9px; font-size: 12px; font-weight: 800;
+  transition: background .14s, color .14s;
+}
+.emp-card:hover .emp-card-btn { background: var(--accent); color: #fff; }
 .section-eyebrow {
   font-size: 11px; font-weight: 700; letter-spacing: .08em;
   text-transform: uppercase; color: var(--accent);

@@ -6,9 +6,17 @@ import Badge from '../components/ui/Badge.jsx';
 import Chip from '../components/ui/Chip.jsx';
 import KpiCard from '../components/ui/KpiCard.jsx';
 import ToggleVista from '../components/ui/ToggleVista.jsx';
+import Semaforo from '../components/Semaforo.jsx';
 import { supabase, supabaseReady, DEMO_TENANT_ID } from '../lib/supabase.js';
 import { useModuleAudit, logAccion } from '../lib/audit.js';
 import { resolverUrlArchivo } from '../lib/storage.js';
+
+// % de expediente lleno, a partir de los campos reales que ya se consultan
+// (sin tabla ni cálculo nuevo — mismo criterio que el semáforo de certeza).
+function completitud(e) {
+  const campos = [e.curp, e.rfc, e.calle, e.colonia, e.correo, e.telefono, e.id_banco, e.foto_url];
+  return campos.filter(Boolean).length / campos.length;
+}
 
 function iniciales(nombres, apPat) {
   return `${(nombres || '?').trim()[0] || ''}${(apPat || '').trim()[0] || ''}`.toUpperCase();
@@ -82,6 +90,7 @@ export default function Personal() {
   const [tab, setTab] = useState('empleados');
   const [vista, setVista] = useState('mosaico');
   const [empleados, setEmpleados] = useState([]);
+  const [plazas, setPlazas] = useState([]);
   const [candidatos, setCandidatos] = useState([]);
   const [nuevoOpen, setNuevoOpen] = useState(false);
   const [nuevoCand, setNuevoCand] = useState({ nombres: '', apellido_paterno: '', rfc: '', curp: '', sexo: 'M', paso_induccion: false });
@@ -93,15 +102,22 @@ export default function Personal() {
 
   async function cargar() {
     if (!supabaseReady) return;
-    const [{ data: e }, { data: c }] = await Promise.all([
+    const [{ data: e }, { data: c }, { data: p }] = await Promise.all([
       supabase.from('te_empleados')
-        .select('id, folio, nombres, apellido_paterno, apellido_materno, activo, regimen_pago, tipo_empleado, id_banco, clabe, correo, telefono, foto_url, puesto:tc_puestos(titulo, pago_default), sitio:tc_sitios(titulo)')
+        .select('id, folio, nombres, apellido_paterno, apellido_materno, activo, regimen_pago, tipo_empleado, id_banco, clabe, correo, telefono, foto_url, curp, rfc, calle, colonia, id_puesto_principal, puesto:tc_puestos(titulo, pago_default), sitio:tc_sitios(titulo)')
         .order('folio'),
-      supabase.from('te_candidatos').select('id, nombres, apellido_paterno, rfc, paso_induccion, promovido_a_empleado, sexo').order('creado_en', { ascending: false })
+      supabase.from('te_candidatos').select('id, nombres, apellido_paterno, rfc, paso_induccion, promovido_a_empleado, sexo').order('creado_en', { ascending: false }),
+      supabase.from('tr_empleado_plaza').select('empleado_id, puesto_id, certeza')
     ]);
-    setEmpleados(e || []); setCandidatos(c || []);
+    setEmpleados(e || []); setCandidatos(c || []); setPlazas(p || []);
   }
   useEffect(() => { cargar(); }, []);
+
+  const certezaMap = useMemo(() => {
+    const m = new Map();
+    for (const p of plazas) m.set(p.empleado_id + ':' + p.puesto_id, Number(p.certeza));
+    return m;
+  }, [plazas]);
 
   const puestosUnicos = useMemo(() => [...new Set(empleados.map(e => e.puesto?.titulo).filter(Boolean))].sort(), [empleados]);
   const sitiosUnicos = useMemo(() => [...new Set(empleados.map(e => e.sitio?.titulo).filter(Boolean))].sort(), [empleados]);
@@ -190,28 +206,37 @@ export default function Personal() {
           </div>
 
           {vista === 'mosaico' && (
-            <div className="card-grid">
+            <div className="card-grid emp-grid">
               {empleadosFiltrados.length === 0 && <p style={{ fontSize: 12, color: 'var(--muted)' }}>Sin empleados que coincidan.</p>}
-              {empleadosFiltrados.map(e => (
-                <div key={e.id} className="card" style={{ cursor: 'pointer', marginBottom: 0 }} onClick={() => navigate('/admin/personal/' + e.id)}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>
-                    <Avatar empleado={e} />
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <div style={{ fontWeight: 700, fontSize: 14, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{e.nombres} {e.apellido_paterno}</div>
-                      <div style={{ fontSize: 11, color: 'var(--muted)' }}>#{e.folio}</div>
+              {empleadosFiltrados.map(e => {
+                const certeza = certezaMap.get(e.id + ':' + e.id_puesto_principal);
+                return (
+                  <div key={e.id} className="emp-card" onClick={() => navigate('/admin/personal/' + e.id)}>
+                    <div className="emp-card-head">
+                      <Avatar empleado={e} size={48} />
+                      <div className="emp-card-id">
+                        <div className="emp-card-name">{e.nombres} {e.apellido_paterno}</div>
+                        <div className="emp-card-folio mono">Folio #{e.folio}</div>
+                      </div>
+                      <Badge estado={e.activo ? 'activo' : 'inactivo'}>{e.activo ? 'ACTIVO' : 'BAJA'}</Badge>
                     </div>
-                    <Badge estado={e.activo ? 'activo' : 'inactivo'}>{e.activo ? 'ACTIVO' : 'BAJA'}</Badge>
+                    <div className="emp-card-meta">
+                      <span>💼 {e.puesto?.titulo || 'Sin puesto'}</span>
+                      <span>📍 {e.sitio?.titulo || 'Sin sitio'}</span>
+                    </div>
+                    <div className="emp-card-semaforos">
+                      <Semaforo porcentaje={completitud(e)} label="Expediente" />
+                      {certeza != null && <Semaforo porcentaje={certeza} label="Certeza" />}
+                    </div>
+                    <div className="emp-card-foot">
+                      <span className="emp-card-tarifa">
+                        💰 {e.puesto?.pago_default ? '$' + Number(e.puesto.pago_default).toLocaleString('es-MX') + '/día' : 'Sin tarifa'}
+                      </span>
+                    </div>
+                    <button className="emp-card-btn">Ver expediente completo →</button>
                   </div>
-                  <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 4 }}>💼 {e.puesto?.titulo || 'Sin puesto'}</div>
-                  <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 12 }}>📍 {e.sitio?.titulo || 'Sin sitio'}</div>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                    <span style={{ fontSize: 11, fontWeight: 700, padding: '3px 8px', borderRadius: 6, background: '#FEF3C7', color: 'var(--gold)' }}>
-                      {e.puesto?.pago_default ? '$' + Number(e.puesto.pago_default).toLocaleString('es-MX') + '/día' : 'Sin tarifa'}
-                    </span>
-                    <span style={{ fontSize: 11, color: 'var(--accent)', fontWeight: 700 }}>Ver expediente →</span>
-                  </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           )}
 
