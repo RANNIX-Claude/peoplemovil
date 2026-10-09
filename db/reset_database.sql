@@ -6416,3 +6416,42 @@ FROM (VALUES
 WHERE NOT EXISTS (SELECT 1 FROM te_backlog_items);
 
 -- ============================================================================
+-- Migración 028 -- Pantallas faltantes confirmadas contra el menú real del
+-- legado (2026-10-09, pedido del usuario: "faltan muchas pantallas... cuando
+-- das de alta trabajador, cuando lo cambias de sueldo... revisa el manual del
+-- usuario"). Los manuales de documentacion-referencia/Manual Usuario (Sprint
+-- 01-03) solo cubren reclutamiento/pedidos/catálogos y varios ni se
+-- terminaron de escribir (ver MANUALES_OCESA_HALLAZGOS.md) -- por eso se
+-- habían descartado antes como fuente de inventario de pantallas. La fuente
+-- real para esto es `documentacion-referencia/ARBOL_MENU_COMPLETO.md` (menú
+-- real del legado 2019, consolidado de 24 documentos de capturas de video:
+-- Nómina 18 ítems, Operaciones 16 ítems, Catálogos 26 ítems), cruzado contra
+-- el inventario de pantallas compiladas reales en `genexus/web` (624
+-- transacciones/catálogos + 104 web panels, ver CLAUDE.md §14) para confirmar
+-- que cada hallazgo corresponde a una pantalla real del sistema GeneXus
+-- (wp_altaempleadoind, te_extras, te_extrasmasivos, tc_folios,
+-- wp_asignacionfolios, te_facturaenc/te_facturadet, facturas_pagos,
+-- facturas_servicios_internos, tp_sueldomatriciales), no a texto de
+-- intención de un manual sin terminar.
+-- ============================================================================
+INSERT INTO te_backlog_items (tenant_id, portal, grupo, titulo, ruta, descripcion, estado, orden)
+SELECT '00000000-0000-0000-0000-000000000001', v.portal, v.grupo, v.titulo, v.ruta, v.descripcion, 'pendiente', v.orden
+FROM (VALUES
+  ('admin', 'Nómina', 'Sin alta individual de empleado',                  null, 'El legado tiene una pantalla propia (wp_altaempleadoind) para dar de alta un trabajador directo. En PeopleMovil la única vía es candidato -> funnel de reclutamiento -> promoción -- no hay forma de dar de alta a un empleado que no pasó por ese proceso.', 20),
+  ('admin', 'Nómina', 'Sin cambio de sueldo individual por empleado',     '/admin/catalogos', 'El sueldo vive en tc_puestos.pago_default (o en tp_sueldos_matriciales por complejidad/duración), compartido por TODOS los empleados de ese puesto -- cambiarlo en Catálogos afecta a todos a la vez. Falta confirmar si el legado (transacción te_empleado) tenía un sueldo individual por empleado o también dependía solo del puesto.', 21),
+  ('admin', 'Nómina', 'Sueldos matriciales sin pantalla de catálogo',     '/admin/catalogos', 'tp_sueldos_matriciales ya tiene datos reales del tabulador legado (Migración 022) pero no aparece en Catálogos (HU 9.01) ni es editable desde ninguna pantalla -- el legado sí tenía esta pantalla (tp_sueldomatriciales).', 22),
+  ('admin', 'Nómina', 'Extras (horas extra / bonos) sin captura',         null, 'El menú Nómina del legado tiene "Extras", "Alta Masiva extras" y "Autorización Extras" (te_extras/te_extrasmasivos) -- en PeopleMovil no existe ninguna pantalla para capturar, cargar en lote ni autorizar extras de un empleado.', 23),
+  ('admin', 'Nómina', 'Asignación de folios sin mecanismo formal',        '/admin/requisiciones', 'El legado tiene un catálogo tc_folios + función de folios consecutivos del servidor (wp_asignacionfolios, prc_actfolios). PeopleMovil genera el folio de Requisiciones en el navegador con Date.now() -- riesgo de colisión, ya anotado por separado en este backlog -- y no hay equivalente a tc_folios en el esquema en absoluto.', 24),
+  ('admin', 'Nómina', 'Dispersión de nómina sin pantalla admin',          '/admin/nomina', 'te_pagos_dispersion solo se lee de solo lectura desde el portal freelance (Mis pagos). No hay pantalla donde el admin genere o ejecute la dispersión de un periodo.', 25),
+  ('admin', 'Nómina', 'Pago de honorarios sin captura individual',        '/admin/nomina', 'Nómina calcula y cierra por periodo, pero no se confirmó una pantalla para capturar/ajustar el pago de honorarios de un empleado puntual, como sí tenía el legado.', 26),
+  ('admin', 'Nómina', 'Lista negra sin pantalla admin',                   null, 'te_lista_negra_empleados existe como tabla (usada para filtrar elegibilidad en el portal freelance) pero no tiene pantalla de administración dedicada -- no está en Catálogos (HU 9.01).', 27),
+  ('admin', 'Nómina', 'Aclaraciones sin flujo de captura/resolución',     '/admin/catalogos', 'Solo existe el catálogo de causas de aclaración (tc_causas_aclaracion, sí en Catálogos). El legado tiene una pantalla "Aclaraciones" (te_aclaraciones) para capturar y resolver una aclaración real -- no existe en PeopleMovil.', 28),
+  ('admin', 'Comercial', 'Facturación: faltan altas/edición reales y pagos', '/admin/facturacion', 'Confirmado contra el legado real: existen transacciones te_facturaenc/te_facturadet (alta/edición de factura) y una pantalla separada facturas_pagos (captura de pagos) -- PeopleMovil solo tiene consulta de solo lectura, sin ninguna de las dos.', 29),
+  ('admin', 'Comercial', 'Facturación de "servicios internos" sin modelar', '/admin/facturacion', 'El legado tiene una pantalla separada facturas_servicios_internos -- un concepto de facturación interna distinto de la factura a cliente normal. te_pedidos.facturar_servicio_interno existe como flag, pero no hay tabla ni pantalla para el proceso completo.', 30),
+  ('admin', 'Comercial', 'Sin carga masiva de PEPs / Centros de Costos',  '/admin/catalogos', 'El menú Operaciones del legado tiene "Carga masiva Peps", "Peps masivos" y "Peps y Centros de Costos" -- tc_partidas_presupuestales ya existe en Catálogos pero solo con alta uno por uno, sin carga masiva.', 31),
+  ('admin', 'Operación', 'TimeScan por Empleado sin reporte',             '/admin/checador', 'El menú Operaciones del legado tiene un reporte dedicado "TimeScan por Empleado" (checadas consolidadas por persona) -- Checador.jsx solo lista los últimos 50 marcajes, sin ese reporte.', 32),
+  ('admin', 'Operación', 'TimeScan por Detalle Pedido sin reporte',       '/admin/sitios', 'Mismo caso que TimeScan por Empleado, pero agrupado por renglón de pedido -- no existe en SitiosAsignacion.jsx.', 33)
+) AS v(portal, grupo, titulo, ruta, descripcion, orden)
+WHERE NOT EXISTS (SELECT 1 FROM te_backlog_items WHERE titulo = 'Sin alta individual de empleado');
+
+-- ============================================================================
