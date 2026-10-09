@@ -21,7 +21,10 @@ const PEDIDO_VACIO = {
 
 const DETALLE_VACIO = {
   id_tipo_personal: '', producto_id: '', puesto_id: '', cantidad: 1, turnos: 1,
-  fecha_cita: '', fecha_liberacion: '', presentacion_id: '',
+  fecha_cita: '', hora_cita_inicio: '', hora_cita_fin: '', fecha_final_cita: '',
+  fecha_liberacion: '', presentacion_id: '', fase_evento_id: '',
+  lugar_cita_id: '', lugar_otro: false, lugar_otro_descripcion: '',
+  facturable: true, permitir_cancelar_confirmaciones: true,
   completar_productos_similares: false, indicaciones_especiales: ''
 };
 
@@ -56,6 +59,7 @@ export default function SitiosAsignacion() {
   const [productos, setProductos] = useState([]);
   const [puestos, setPuestos] = useState([]);
   const [presentaciones, setPresentaciones] = useState([]);
+  const [fasesEvento, setFasesEvento] = useState([]);
 
   // --- ficha de pedido ---
   const [pedidoSel, setPedidoSel] = useState(null);
@@ -84,7 +88,7 @@ export default function SitiosAsignacion() {
     const [
       { data: p }, { data: s }, { data: c }, { data: un }, { data: sp }, { data: spag },
       { data: tm }, { data: tcx }, { data: td }, { data: resp }, { data: lc },
-      { data: tper }, { data: prod }, { data: pues }, { data: pres }
+      { data: tper }, { data: prod }, { data: pues }, { data: pres }, { data: fev }
     ] = await Promise.all([
       supabase.from('te_pedidos').select('*').order('fecha_evento', { ascending: false }).limit(100),
       supabase.from('tc_sitios').select('id, titulo, tipo_sitio, direccion_abreviada, activo').order('titulo'),
@@ -100,13 +104,15 @@ export default function SitiosAsignacion() {
       supabase.from('tc_tipos_personal').select('id, clave, descripcion'),
       supabase.from('tc_productos').select('id, titulo, subcategoria, id_puesto').eq('vigente', true).order('titulo'),
       supabase.from('tc_puestos').select('id, titulo, duracion_turno_horas').eq('activo', true).order('titulo'),
-      supabase.from('tc_presentaciones_producto').select('id, titulo').eq('activo', true).order('titulo')
+      supabase.from('tc_presentaciones_producto').select('id, titulo').eq('activo', true).order('titulo'),
+      supabase.from('tc_fases_evento').select('id, clave, titulo, orden').order('orden')
     ]);
     setPedidos(p || []); setSitios(s || []); setClientes(c || []);
     setUnidadesNegocio(un || []); setSociedadesPropias(sp || []); setSociedadesPagadoras(spag || []);
     setTiposMovimiento(tm || []); setTiposComplejidad(tcx || []); setTiposDuracion(td || []);
     setResponsables(resp || []); setLugaresCita(lc || []);
     setTiposPersonal(tper || []); setProductos(prod || []); setPuestos(pues || []); setPresentaciones(pres || []);
+    setFasesEvento(fev || []);
   }
   useEffect(() => { cargar(); }, []);
 
@@ -317,8 +323,17 @@ export default function SitiosAsignacion() {
       cantidad: Number(nuevoDetalle.cantidad) || 1,
       turnos: Number(nuevoDetalle.turnos) || 1,
       fecha_cita: nuevoDetalle.fecha_cita || null,
+      hora_cita_inicio: nuevoDetalle.hora_cita_inicio || null,
+      hora_cita_fin: nuevoDetalle.hora_cita_fin || null,
+      fecha_final_cita: nuevoDetalle.fecha_final_cita || null,
       fecha_liberacion: nuevoDetalle.fecha_liberacion || null,
       presentacion_id: nuevoDetalle.presentacion_id || null,
+      fase_evento_id: nuevoDetalle.fase_evento_id || null,
+      lugar_cita_id: nuevoDetalle.lugar_otro ? null : (nuevoDetalle.lugar_cita_id || null),
+      lugar_otro: nuevoDetalle.lugar_otro,
+      lugar_otro_descripcion: nuevoDetalle.lugar_otro ? (nuevoDetalle.lugar_otro_descripcion || null) : null,
+      facturable: nuevoDetalle.facturable,
+      permitir_cancelar_confirmaciones: nuevoDetalle.permitir_cancelar_confirmaciones,
       completar_productos_similares: nuevoDetalle.completar_productos_similares,
       indicaciones_especiales: nuevoDetalle.indicaciones_especiales || null
     };
@@ -351,8 +366,17 @@ export default function SitiosAsignacion() {
       cantidad: d.cantidad ?? 1,
       turnos: d.turnos ?? 1,
       fecha_cita: d.fecha_cita || '',
+      hora_cita_inicio: d.hora_cita_inicio || '',
+      hora_cita_fin: d.hora_cita_fin || '',
+      fecha_final_cita: d.fecha_final_cita ? d.fecha_final_cita.slice(0, 10) : '',
       fecha_liberacion: d.fecha_liberacion ? d.fecha_liberacion.slice(0, 10) : '',
       presentacion_id: d.presentacion_id || '',
+      fase_evento_id: d.fase_evento_id || '',
+      lugar_cita_id: d.lugar_cita_id || '',
+      lugar_otro: !!d.lugar_otro,
+      lugar_otro_descripcion: d.lugar_otro_descripcion || '',
+      facturable: d.facturable ?? true,
+      permitir_cancelar_confirmaciones: d.permitir_cancelar_confirmaciones ?? true,
       completar_productos_similares: !!d.completar_productos_similares,
       indicaciones_especiales: d.indicaciones_especiales || ''
     });
@@ -504,7 +528,7 @@ export default function SitiosAsignacion() {
                   Matriz de Puestos — fechas como columnas, Bloque + Producto como filas (equivalente a la matriz del sistema Lobo, vía <code>matriz_puestos_pedido()</code>).
                 </span>
                 {pedidoSel.status !== 'cancelado' && (
-                  <button className="btn sm" onClick={() => { setNuevoDetalle(DETALLE_VACIO); setEditandoDetalleId(null); setMsgDetalle(''); setDetalleOpen(true); }}>+ Agregar detalle</button>
+                  <button className="btn sm" onClick={() => { setNuevoDetalle({ ...DETALLE_VACIO, lugar_cita_id: pedidoSel?.lugar_cita_id || '' }); setEditandoDetalleId(null); setMsgDetalle(''); setDetalleOpen(true); }}>+ Agregar detalle</button>
                 )}
               </div>
               {matrizPivot.grupos.length === 0 ? (
@@ -700,14 +724,47 @@ export default function SitiosAsignacion() {
                 <input required type="number" min="0.5" step="0.5" className="field" value={nuevoDetalle.turnos} onChange={e => setNuevoDetalle({ ...nuevoDetalle, turnos: e.target.value })} />
               </div>
             </div>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 12 }}>
               <div><label className="label">Fecha de cita</label>
                 <input type="date" className="field" value={nuevoDetalle.fecha_cita} onChange={e => setNuevoDetalle({ ...nuevoDetalle, fecha_cita: e.target.value })} />
+              </div>
+              <div><label className="label">Hora inicio</label>
+                <input type="time" className="field" value={nuevoDetalle.hora_cita_inicio} onChange={e => setNuevoDetalle({ ...nuevoDetalle, hora_cita_inicio: e.target.value })} />
+              </div>
+              <div><label className="label">Hora fin</label>
+                <input type="time" className="field" value={nuevoDetalle.hora_cita_fin} onChange={e => setNuevoDetalle({ ...nuevoDetalle, hora_cita_fin: e.target.value })} />
+              </div>
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+              <div><label className="label">Fecha final de cita</label>
+                <input type="date" className="field" value={nuevoDetalle.fecha_final_cita} onChange={e => setNuevoDetalle({ ...nuevoDetalle, fecha_final_cita: e.target.value })} />
+                <p style={{ fontSize: 11, color: 'var(--muted)', marginTop: 4 }}>Último día que cubre este renglón (eventos multi-día).</p>
               </div>
               <div><label className="label">Fecha de liberación</label>
                 <input type="date" className="field" value={nuevoDetalle.fecha_liberacion} onChange={e => setNuevoDetalle({ ...nuevoDetalle, fecha_liberacion: e.target.value })} />
                 <p style={{ fontSize: 11, color: 'var(--muted)', marginTop: 4 }}>No puede ser posterior a la fecha de cita.</p>
               </div>
+            </div>
+            <div>
+              <label className="label">Lugar de cita</label>
+              <div style={{ display: 'flex', gap: 16, marginBottom: 6 }}>
+                <label style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <input type="radio" name="lugarCitaModo" checked={!nuevoDetalle.lugar_otro} onChange={() => setNuevoDetalle({ ...nuevoDetalle, lugar_otro: false })} />
+                  Elegir sitio
+                </label>
+                <label style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <input type="radio" name="lugarCitaModo" checked={nuevoDetalle.lugar_otro} onChange={() => setNuevoDetalle({ ...nuevoDetalle, lugar_otro: true })} />
+                  Otro
+                </label>
+              </div>
+              {!nuevoDetalle.lugar_otro ? (
+                <select className="field" value={nuevoDetalle.lugar_cita_id} onChange={e => setNuevoDetalle({ ...nuevoDetalle, lugar_cita_id: e.target.value })}>
+                  <option value="">— elegir —</option>
+                  {lugaresCita.map(l => <option key={l.id} value={l.id}>{l.titulo}</option>)}
+                </select>
+              ) : (
+                <input className="field" placeholder="Dirección de la cita" value={nuevoDetalle.lugar_otro_descripcion} onChange={e => setNuevoDetalle({ ...nuevoDetalle, lugar_otro_descripcion: e.target.value })} />
+              )}
             </div>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, alignItems: 'center' }}>
               <div><label className="label">Presentación por producto</label>
@@ -716,9 +773,25 @@ export default function SitiosAsignacion() {
                   {presentaciones.map(p => <option key={p.id} value={p.id}>{p.titulo}</option>)}
                 </select>
               </div>
-              <label style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 20 }}>
+              <div><label className="label">Fase del evento</label>
+                <select className="field" value={nuevoDetalle.fase_evento_id} onChange={e => setNuevoDetalle({ ...nuevoDetalle, fase_evento_id: e.target.value })}>
+                  <option value="">— sin fase —</option>
+                  {fasesEvento.map(f => <option key={f.id} value={f.id}>{f.titulo}</option>)}
+                </select>
+              </div>
+            </div>
+            <div style={{ display: 'flex', gap: 20, flexWrap: 'wrap' }}>
+              <label style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                 <input type="checkbox" checked={nuevoDetalle.completar_productos_similares} onChange={e => setNuevoDetalle({ ...nuevoDetalle, completar_productos_similares: e.target.checked })} />
                 Completar con similares
+              </label>
+              <label style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <input type="checkbox" checked={nuevoDetalle.facturable} onChange={e => setNuevoDetalle({ ...nuevoDetalle, facturable: e.target.checked })} />
+                Facturable
+              </label>
+              <label style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <input type="checkbox" checked={nuevoDetalle.permitir_cancelar_confirmaciones} onChange={e => setNuevoDetalle({ ...nuevoDetalle, permitir_cancelar_confirmaciones: e.target.checked })} />
+                Permitir cancelar confirmaciones
               </label>
             </div>
             <div><label className="label">Indicaciones especiales</label>

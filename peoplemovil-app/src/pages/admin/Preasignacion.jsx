@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { supabase, supabaseReady, DEMO_TENANT_ID } from '../../lib/supabase.js';
 import TablaWrap from '../../components/ui/TablaWrap.jsx';
 import Badge from '../../components/ui/Badge.jsx';
@@ -16,6 +17,8 @@ import { useModuleAudit, logAccion } from '../../lib/audit.js';
 // el flag "Completar con similares" del detalle (ver Migración 020).
 export default function Preasignacion() {
   useModuleAudit('preasignacion');
+  const [searchParams] = useSearchParams();
+  const detalleIdUrl = searchParams.get('detalle'); // llega desde "Reservaciones" en el menú contextual de la Matriz de Puestos
   const [detalles, setDetalles] = useState([]);
   const [selDetalle, setSelDetalle] = useState(null);
   const [disponibles, setDisponibles] = useState([]);
@@ -34,6 +37,21 @@ export default function Preasignacion() {
       .in('status_detalle', ['borrador','liberado']).order('fecha_cita').limit(50)
       .then(({ data }) => setDetalles(data || []));
   }, []);
+
+  // Si se llegó desde "Reservaciones" en el menú contextual de la Matriz de Puestos
+  // (?detalle=<id>), traer y preseleccionar ese renglón aunque no esté en los 50
+  // más recientes (p.ej. ya está "procesado" o "cancelado") y agregarlo a la lista.
+  useEffect(() => {
+    if (!supabaseReady || !detalleIdUrl) return;
+    supabase.from('te_pedidos_detalle').select('*, tc_puestos(titulo), tc_productos(titulo), te_pedidos(folio, titulo, sitio_id, fecha_evento)')
+      .eq('id', detalleIdUrl).maybeSingle()
+      .then(({ data }) => {
+        if (!data) return;
+        setDetalles(prev => prev.some(d => d.id === data.id) ? prev : [data, ...prev]);
+        cargarDetalle(data);
+      });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [detalleIdUrl]);
 
   const cargarDetalle = async (d) => {
     setSelDetalle(d);

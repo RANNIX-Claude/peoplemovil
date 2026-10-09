@@ -5655,3 +5655,227 @@ FROM tc_productos seg, tc_productos cda
 WHERE seg.tenant_id = '00000000-0000-0000-0000-000000000001' AND seg.titulo = 'Seguridad' AND seg.subcategoria = 'Femenino'
   AND cda.tenant_id = '00000000-0000-0000-0000-000000000001' AND cda.titulo = 'Control de Accesos' AND cda.subcategoria = 'Femenino'
 ON CONFLICT (tenant_id, producto_id, producto_similar_id) DO NOTHING;
+
+-- ----------------------------------------------------------------------------
+-- Migración 021 (2026-10-08): siembra representativa de tp_duraciones_evento
+-- y tp_sueldos_matriciales -- ver documentacion-referencia/
+-- REGLAS_FASE_EVENTO_COMPLEJIDAD_TARIFAS.md. Grounded en datos reales del QA
+-- legado (Escenario 29: Auditorio Nacional 3 días -> 100%-50%-50%) y en el
+-- patrón "Fase 1 (1-4 días)/Quinto/Sexto/Séptimo día en adelante" visto en
+-- producción real (Access Ocesa03_j_m.accdb). Puestos matriciales elegidos
+-- porque ya tenían pago_default=0 (sin tarifa plana) y aparecen en los
+-- escenarios de prueba QA reales (Productor, Stage Manager, Runner).
+-- ----------------------------------------------------------------------------
+UPDATE tc_puestos SET matricial = true
+WHERE tenant_id = '00000000-0000-0000-0000-000000000001'
+  AND id IN (
+    'be86586d-e8af-4030-a461-5402c95f2cf7', -- Productor A
+    'd446afb2-1a6c-4165-906f-9722f6bf7cac', -- Productor B
+    '9dc60613-0b51-47b3-b81d-6306cc8a7c43', -- Productor C
+    'c53cf64c-36e3-44b8-b031-b2ab671c1468', -- Stage Manager A
+    'bd1abb68-fa90-4187-9eff-cc13c175c605', -- Stage Manager B
+    '4f5edafb-4ec5-4772-a65c-2fa591d91003', -- Stage Manager C
+    '675816cf-46bd-4f6c-8580-398dcc7b36fc', -- Runner
+    'ab93943e-0967-4082-9354-cd2efe36eb9e', -- Runner con coche
+    '0334a343-dd36-408c-acc4-75954501f9b4'  -- Runner sin coche
+  );
+
+INSERT INTO tp_duraciones_evento (tenant_id, tipo_duracion_id, id_tipo_complejidad, dias_desde, dias_hasta, factor_sueldo, observaciones) VALUES
+('00000000-0000-0000-0000-000000000001','0356fd52-1c65-4b51-9d45-4a92dd1074f9', NULL, 1, 1, 1.000, 'Día único, tarifa completa'),
+('00000000-0000-0000-0000-000000000001','279954c3-8606-40c0-815a-875e7f60991b', NULL, 1, 2, 1.000, 'Dos días, tarifa completa'),
+('00000000-0000-0000-0000-000000000001','799f7cc7-2bf3-43a9-bc07-ec02ca20df7c', NULL, 1, 3, 1.000, 'Fin de semana, tarifa completa (genérico)'),
+('00000000-0000-0000-0000-000000000001','e83e528a-b5d9-4434-a880-3d57ba09324e', NULL, 1, 4, 1.000, 'Días 1-4, tarifa completa (equivalente a "Fase 1" legado)'),
+('00000000-0000-0000-0000-000000000001','e83e528a-b5d9-4434-a880-3d57ba09324e', NULL, 5, 5, 0.750, 'Quinto día (equivalente a "Fase 2" legado)'),
+('00000000-0000-0000-0000-000000000001','e83e528a-b5d9-4434-a880-3d57ba09324e', NULL, 6, 6, 0.600, 'Sexto día (equivalente a "Fase 3" legado)'),
+('00000000-0000-0000-0000-000000000001','e83e528a-b5d9-4434-a880-3d57ba09324e', NULL, 7, 7, 0.500, 'Séptimo día en adelante (equivalente a "Fase 4" legado)'),
+('00000000-0000-0000-0000-000000000001','5b77ed5e-2433-4299-a4e3-121b9f686fba', NULL, 1, 4, 1.000, 'Días 1-4, tarifa completa'),
+('00000000-0000-0000-0000-000000000001','5b77ed5e-2433-4299-a4e3-121b9f686fba', NULL, 5, 5, 0.750, 'Quinto día'),
+('00000000-0000-0000-0000-000000000001','5b77ed5e-2433-4299-a4e3-121b9f686fba', NULL, 6, 6, 0.600, 'Sexto día'),
+('00000000-0000-0000-0000-000000000001','5b77ed5e-2433-4299-a4e3-121b9f686fba', NULL, 7, 15, 0.500, 'Séptimo día en adelante, sostenido hasta fin de quincena'),
+('00000000-0000-0000-0000-000000000001','44045ae2-762c-4791-a279-eb5dea6f5cc6', NULL, 1, 4, 1.000, 'Días 1-4, tarifa completa'),
+('00000000-0000-0000-0000-000000000001','44045ae2-762c-4791-a279-eb5dea6f5cc6', NULL, 5, 5, 0.750, 'Quinto día'),
+('00000000-0000-0000-0000-000000000001','44045ae2-762c-4791-a279-eb5dea6f5cc6', NULL, 6, 6, 0.600, 'Sexto día'),
+('00000000-0000-0000-0000-000000000001','44045ae2-762c-4791-a279-eb5dea6f5cc6', NULL, 7, 31, 0.500, 'Séptimo día en adelante, sostenido hasta fin de mes'),
+('00000000-0000-0000-0000-000000000001','799f7cc7-2bf3-43a9-bc07-ec02ca20df7c', 'b81657d7-41b5-46bb-a693-7831e02cfc98', 1, 1, 1.000, 'Auditorio Nacional día 1: 100% (Escenario 29 QA real)'),
+('00000000-0000-0000-0000-000000000001','799f7cc7-2bf3-43a9-bc07-ec02ca20df7c', 'b81657d7-41b5-46bb-a693-7831e02cfc98', 2, 3, 0.500, 'Auditorio Nacional días 2-3: 50% (Escenario 29 QA real)');
+
+INSERT INTO tp_sueldos_matriciales (tenant_id, puesto_id, tipo_complejidad_id, tipo_duracion_id, turnos, sueldo_base, factor, vigente_desde) VALUES
+('00000000-0000-0000-0000-000000000001','be86586d-e8af-4030-a461-5402c95f2cf7', NULL, '0356fd52-1c65-4b51-9d45-4a92dd1074f9', 1, 1800.00, 1.000, CURRENT_DATE),
+('00000000-0000-0000-0000-000000000001','be86586d-e8af-4030-a461-5402c95f2cf7', NULL, '279954c3-8606-40c0-815a-875e7f60991b', 1, 1800.00, 1.000, CURRENT_DATE),
+('00000000-0000-0000-0000-000000000001','be86586d-e8af-4030-a461-5402c95f2cf7', NULL, '799f7cc7-2bf3-43a9-bc07-ec02ca20df7c', 1, 1800.00, 1.000, CURRENT_DATE),
+('00000000-0000-0000-0000-000000000001','be86586d-e8af-4030-a461-5402c95f2cf7', NULL, 'e83e528a-b5d9-4434-a880-3d57ba09324e', 1, 1710.00, 1.000, CURRENT_DATE),
+('00000000-0000-0000-0000-000000000001','be86586d-e8af-4030-a461-5402c95f2cf7', NULL, '5b77ed5e-2433-4299-a4e3-121b9f686fba', 1, 1620.00, 1.000, CURRENT_DATE),
+('00000000-0000-0000-0000-000000000001','be86586d-e8af-4030-a461-5402c95f2cf7', NULL, '44045ae2-762c-4791-a279-eb5dea6f5cc6', 1, 1530.00, 1.000, CURRENT_DATE),
+('00000000-0000-0000-0000-000000000001','d446afb2-1a6c-4165-906f-9722f6bf7cac', NULL, '0356fd52-1c65-4b51-9d45-4a92dd1074f9', 1, 1400.00, 1.000, CURRENT_DATE),
+('00000000-0000-0000-0000-000000000001','d446afb2-1a6c-4165-906f-9722f6bf7cac', NULL, '279954c3-8606-40c0-815a-875e7f60991b', 1, 1400.00, 1.000, CURRENT_DATE),
+('00000000-0000-0000-0000-000000000001','d446afb2-1a6c-4165-906f-9722f6bf7cac', NULL, '799f7cc7-2bf3-43a9-bc07-ec02ca20df7c', 1, 1400.00, 1.000, CURRENT_DATE),
+('00000000-0000-0000-0000-000000000001','d446afb2-1a6c-4165-906f-9722f6bf7cac', NULL, 'e83e528a-b5d9-4434-a880-3d57ba09324e', 1, 1330.00, 1.000, CURRENT_DATE),
+('00000000-0000-0000-0000-000000000001','d446afb2-1a6c-4165-906f-9722f6bf7cac', NULL, '5b77ed5e-2433-4299-a4e3-121b9f686fba', 1, 1260.00, 1.000, CURRENT_DATE),
+('00000000-0000-0000-0000-000000000001','d446afb2-1a6c-4165-906f-9722f6bf7cac', NULL, '44045ae2-762c-4791-a279-eb5dea6f5cc6', 1, 1190.00, 1.000, CURRENT_DATE),
+('00000000-0000-0000-0000-000000000001','9dc60613-0b51-47b3-b81d-6306cc8a7c43', NULL, '0356fd52-1c65-4b51-9d45-4a92dd1074f9', 1, 1200.00, 1.000, CURRENT_DATE),
+('00000000-0000-0000-0000-000000000001','9dc60613-0b51-47b3-b81d-6306cc8a7c43', NULL, '279954c3-8606-40c0-815a-875e7f60991b', 1, 1200.00, 1.000, CURRENT_DATE),
+('00000000-0000-0000-0000-000000000001','9dc60613-0b51-47b3-b81d-6306cc8a7c43', NULL, '799f7cc7-2bf3-43a9-bc07-ec02ca20df7c', 1, 1200.00, 1.000, CURRENT_DATE),
+('00000000-0000-0000-0000-000000000001','9dc60613-0b51-47b3-b81d-6306cc8a7c43', NULL, 'e83e528a-b5d9-4434-a880-3d57ba09324e', 1, 1140.00, 1.000, CURRENT_DATE),
+('00000000-0000-0000-0000-000000000001','9dc60613-0b51-47b3-b81d-6306cc8a7c43', NULL, '5b77ed5e-2433-4299-a4e3-121b9f686fba', 1, 1080.00, 1.000, CURRENT_DATE),
+('00000000-0000-0000-0000-000000000001','9dc60613-0b51-47b3-b81d-6306cc8a7c43', NULL, '44045ae2-762c-4791-a279-eb5dea6f5cc6', 1, 1020.00, 1.000, CURRENT_DATE),
+('00000000-0000-0000-0000-000000000001','c53cf64c-36e3-44b8-b031-b2ab671c1468', NULL, '0356fd52-1c65-4b51-9d45-4a92dd1074f9', 1, 1600.00, 1.000, CURRENT_DATE),
+('00000000-0000-0000-0000-000000000001','c53cf64c-36e3-44b8-b031-b2ab671c1468', NULL, '279954c3-8606-40c0-815a-875e7f60991b', 1, 1600.00, 1.000, CURRENT_DATE),
+('00000000-0000-0000-0000-000000000001','c53cf64c-36e3-44b8-b031-b2ab671c1468', NULL, '799f7cc7-2bf3-43a9-bc07-ec02ca20df7c', 1, 1600.00, 1.000, CURRENT_DATE),
+('00000000-0000-0000-0000-000000000001','c53cf64c-36e3-44b8-b031-b2ab671c1468', NULL, 'e83e528a-b5d9-4434-a880-3d57ba09324e', 1, 1520.00, 1.000, CURRENT_DATE),
+('00000000-0000-0000-0000-000000000001','c53cf64c-36e3-44b8-b031-b2ab671c1468', NULL, '5b77ed5e-2433-4299-a4e3-121b9f686fba', 1, 1440.00, 1.000, CURRENT_DATE),
+('00000000-0000-0000-0000-000000000001','c53cf64c-36e3-44b8-b031-b2ab671c1468', NULL, '44045ae2-762c-4791-a279-eb5dea6f5cc6', 1, 1360.00, 1.000, CURRENT_DATE),
+('00000000-0000-0000-0000-000000000001','bd1abb68-fa90-4187-9eff-cc13c175c605', NULL, '0356fd52-1c65-4b51-9d45-4a92dd1074f9', 1, 1300.00, 1.000, CURRENT_DATE),
+('00000000-0000-0000-0000-000000000001','bd1abb68-fa90-4187-9eff-cc13c175c605', NULL, '279954c3-8606-40c0-815a-875e7f60991b', 1, 1300.00, 1.000, CURRENT_DATE),
+('00000000-0000-0000-0000-000000000001','bd1abb68-fa90-4187-9eff-cc13c175c605', NULL, '799f7cc7-2bf3-43a9-bc07-ec02ca20df7c', 1, 1300.00, 1.000, CURRENT_DATE),
+('00000000-0000-0000-0000-000000000001','bd1abb68-fa90-4187-9eff-cc13c175c605', NULL, 'e83e528a-b5d9-4434-a880-3d57ba09324e', 1, 1235.00, 1.000, CURRENT_DATE),
+('00000000-0000-0000-0000-000000000001','bd1abb68-fa90-4187-9eff-cc13c175c605', NULL, '5b77ed5e-2433-4299-a4e3-121b9f686fba', 1, 1170.00, 1.000, CURRENT_DATE),
+('00000000-0000-0000-0000-000000000001','bd1abb68-fa90-4187-9eff-cc13c175c605', NULL, '44045ae2-762c-4791-a279-eb5dea6f5cc6', 1, 1105.00, 1.000, CURRENT_DATE),
+('00000000-0000-0000-0000-000000000001','4f5edafb-4ec5-4772-a65c-2fa591d91003', NULL, '0356fd52-1c65-4b51-9d45-4a92dd1074f9', 1, 1100.00, 1.000, CURRENT_DATE),
+('00000000-0000-0000-0000-000000000001','4f5edafb-4ec5-4772-a65c-2fa591d91003', NULL, '279954c3-8606-40c0-815a-875e7f60991b', 1, 1100.00, 1.000, CURRENT_DATE),
+('00000000-0000-0000-0000-000000000001','4f5edafb-4ec5-4772-a65c-2fa591d91003', NULL, '799f7cc7-2bf3-43a9-bc07-ec02ca20df7c', 1, 1100.00, 1.000, CURRENT_DATE),
+('00000000-0000-0000-0000-000000000001','4f5edafb-4ec5-4772-a65c-2fa591d91003', NULL, 'e83e528a-b5d9-4434-a880-3d57ba09324e', 1, 1045.00, 1.000, CURRENT_DATE),
+('00000000-0000-0000-0000-000000000001','4f5edafb-4ec5-4772-a65c-2fa591d91003', NULL, '5b77ed5e-2433-4299-a4e3-121b9f686fba', 1, 990.00, 1.000, CURRENT_DATE),
+('00000000-0000-0000-0000-000000000001','4f5edafb-4ec5-4772-a65c-2fa591d91003', NULL, '44045ae2-762c-4791-a279-eb5dea6f5cc6', 1, 935.00, 1.000, CURRENT_DATE),
+('00000000-0000-0000-0000-000000000001','675816cf-46bd-4f6c-8580-398dcc7b36fc', NULL, '0356fd52-1c65-4b51-9d45-4a92dd1074f9', 1, 450.00, 1.000, CURRENT_DATE),
+('00000000-0000-0000-0000-000000000001','675816cf-46bd-4f6c-8580-398dcc7b36fc', NULL, '279954c3-8606-40c0-815a-875e7f60991b', 1, 450.00, 1.000, CURRENT_DATE),
+('00000000-0000-0000-0000-000000000001','675816cf-46bd-4f6c-8580-398dcc7b36fc', NULL, '799f7cc7-2bf3-43a9-bc07-ec02ca20df7c', 1, 450.00, 1.000, CURRENT_DATE),
+('00000000-0000-0000-0000-000000000001','675816cf-46bd-4f6c-8580-398dcc7b36fc', NULL, 'e83e528a-b5d9-4434-a880-3d57ba09324e', 1, 427.50, 1.000, CURRENT_DATE),
+('00000000-0000-0000-0000-000000000001','675816cf-46bd-4f6c-8580-398dcc7b36fc', NULL, '5b77ed5e-2433-4299-a4e3-121b9f686fba', 1, 405.00, 1.000, CURRENT_DATE),
+('00000000-0000-0000-0000-000000000001','675816cf-46bd-4f6c-8580-398dcc7b36fc', NULL, '44045ae2-762c-4791-a279-eb5dea6f5cc6', 1, 382.50, 1.000, CURRENT_DATE),
+('00000000-0000-0000-0000-000000000001','ab93943e-0967-4082-9354-cd2efe36eb9e', NULL, '0356fd52-1c65-4b51-9d45-4a92dd1074f9', 1, 650.00, 1.000, CURRENT_DATE),
+('00000000-0000-0000-0000-000000000001','ab93943e-0967-4082-9354-cd2efe36eb9e', NULL, '279954c3-8606-40c0-815a-875e7f60991b', 1, 650.00, 1.000, CURRENT_DATE),
+('00000000-0000-0000-0000-000000000001','ab93943e-0967-4082-9354-cd2efe36eb9e', NULL, '799f7cc7-2bf3-43a9-bc07-ec02ca20df7c', 1, 650.00, 1.000, CURRENT_DATE),
+('00000000-0000-0000-0000-000000000001','ab93943e-0967-4082-9354-cd2efe36eb9e', NULL, 'e83e528a-b5d9-4434-a880-3d57ba09324e', 1, 617.50, 1.000, CURRENT_DATE),
+('00000000-0000-0000-0000-000000000001','ab93943e-0967-4082-9354-cd2efe36eb9e', NULL, '5b77ed5e-2433-4299-a4e3-121b9f686fba', 1, 585.00, 1.000, CURRENT_DATE),
+('00000000-0000-0000-0000-000000000001','ab93943e-0967-4082-9354-cd2efe36eb9e', NULL, '44045ae2-762c-4791-a279-eb5dea6f5cc6', 1, 552.50, 1.000, CURRENT_DATE),
+('00000000-0000-0000-0000-000000000001','0334a343-dd36-408c-acc4-75954501f9b4', NULL, '0356fd52-1c65-4b51-9d45-4a92dd1074f9', 1, 400.00, 1.000, CURRENT_DATE),
+('00000000-0000-0000-0000-000000000001','0334a343-dd36-408c-acc4-75954501f9b4', NULL, '279954c3-8606-40c0-815a-875e7f60991b', 1, 400.00, 1.000, CURRENT_DATE),
+('00000000-0000-0000-0000-000000000001','0334a343-dd36-408c-acc4-75954501f9b4', NULL, '799f7cc7-2bf3-43a9-bc07-ec02ca20df7c', 1, 400.00, 1.000, CURRENT_DATE),
+('00000000-0000-0000-0000-000000000001','0334a343-dd36-408c-acc4-75954501f9b4', NULL, 'e83e528a-b5d9-4434-a880-3d57ba09324e', 1, 380.00, 1.000, CURRENT_DATE),
+('00000000-0000-0000-0000-000000000001','0334a343-dd36-408c-acc4-75954501f9b4', NULL, '5b77ed5e-2433-4299-a4e3-121b9f686fba', 1, 360.00, 1.000, CURRENT_DATE),
+('00000000-0000-0000-0000-000000000001','0334a343-dd36-408c-acc4-75954501f9b4', NULL, '44045ae2-762c-4791-a279-eb5dea6f5cc6', 1, 340.00, 1.000, CURRENT_DATE);
+
+-- ----------------------------------------------------------------------------
+-- Migración 022 (2026-10-09): corrige la Migración 021 con datos REALES del
+-- legado ("Catalogos Sueldos Matriciales.xlsx": hojas Puestos, Sueldos
+-- Matriciales, Tipos de Complejidad en Eventos, Sueldos Matriciales Duracion,
+-- Sueldos Mat Duracion Detalle) en vez de los valores representativos
+-- inventados. Ver documentacion-referencia/REGLAS_FASE_EVENTO_COMPLEJIDAD_TARIFAS.md.
+-- También corrige un gap real en cancelacion_automatica_preasignados(): la
+-- regla de negocio real dice "Este proceso no aplica para las unidades de
+-- negocio de Producción y PRG" (reglas de negocio_cancelaciones.docx) y la
+-- función no tenía esa excepción.
+-- ----------------------------------------------------------------------------
+ALTER TABLE tp_sueldos_matriciales
+  ADD COLUMN IF NOT EXISTS fase_evento_id  uuid REFERENCES tc_fases_evento(id),
+  ADD COLUMN IF NOT EXISTS fase_evento_str text;
+
+ALTER TABLE tp_duraciones_evento
+  ADD COLUMN IF NOT EXISTS prorrateado      boolean NOT NULL DEFAULT false,
+  ADD COLUMN IF NOT EXISTS divisor_prorrateo int;
+
+DELETE FROM tp_sueldos_matriciales;
+DELETE FROM tp_duraciones_evento;
+
+UPDATE tc_tipos_complejidad SET clave='teatro_metropolitan', titulo='Teatro Metropolitan, Plaza Condesa y Plazas Similares' WHERE id='632d6ec3-0cac-4b57-a8bb-1049860ff05d';
+UPDATE tc_tipos_complejidad SET clave='auditorio_nacional',  titulo='Auditorio Nacional, Auditorio Guadalajara y Plazas Similares' WHERE id='b81657d7-41b5-46bb-a693-7831e02cfc98';
+UPDATE tc_tipos_complejidad SET clave='palacio_deportes',    titulo='Palacio de los Deportes, Arena VFG y Plazas Similares' WHERE id='e4e32332-5b79-4756-b5cf-3ba4c9d8f909';
+UPDATE tc_tipos_complejidad SET clave='foro_sol_50k',        titulo='Foro Sol, Festivales hasta 50,000 asistentes y Plazas Similares' WHERE id='d7cd0fe7-8dba-452d-be8e-281c83b51f2f';
+UPDATE tc_tipos_complejidad SET clave='estadios_extranjero', titulo='Estadios Foro y Plazas Similares en el Extranjero' WHERE id='ec81d9ea-1ea7-4319-9422-93f2008c35ab';
+UPDATE tc_tipos_complejidad SET clave='festivales_50k_mas',  titulo='Festivales de mas de 50,000 asistentes' WHERE id='3e8553a0-82db-4d49-b269-39fdc507f7b5';
+
+DELETE FROM tp_sueldos_matriciales WHERE tipo_duracion_id IN (SELECT id FROM tc_tipos_duracion_evento);
+DELETE FROM tp_duraciones_evento WHERE tipo_duracion_id IN (SELECT id FROM tc_tipos_duracion_evento);
+DELETE FROM tc_tipos_duracion_evento;
+
+INSERT INTO tc_tipos_duracion_evento (id, tenant_id, clave, titulo, dias_minimos, dias_maximos) VALUES
+('a1a1a1a1-0001-4001-8001-000000000001','00000000-0000-0000-0000-000000000001','shows_sueltos','Shows Sueltos',1,3),
+('a1a1a1a1-0001-4001-8001-000000000002','00000000-0000-0000-0000-000000000001','tarifa_semana','Tarifa por Semana',4,29),
+('a1a1a1a1-0001-4001-8001-000000000003','00000000-0000-0000-0000-000000000001','tarifa_mes','Tarifa por Mes',30,365);
+
+INSERT INTO tp_duraciones_evento (tenant_id, tipo_duracion_id, id_tipo_complejidad, dias_desde, dias_hasta, factor_sueldo, prorrateado, divisor_prorrateo, observaciones) VALUES
+('00000000-0000-0000-0000-000000000001','a1a1a1a1-0001-4001-8001-000000000001', NULL, 1, 1, 1.000, false, NULL, 'Shows Sueltos, día 1: 100%'),
+('00000000-0000-0000-0000-000000000001','a1a1a1a1-0001-4001-8001-000000000001', NULL, 2, 2, 0.500, false, NULL, 'Shows Sueltos, día 2: 50%'),
+('00000000-0000-0000-0000-000000000001','a1a1a1a1-0001-4001-8001-000000000001', NULL, 3, 3, 0.500, false, NULL, 'Shows Sueltos, día 3: 50%'),
+('00000000-0000-0000-0000-000000000001','a1a1a1a1-0001-4001-8001-000000000002', NULL, 4, 7, 1.000, false, NULL, 'Tarifa por Semana, días 4-7: 100%'),
+('00000000-0000-0000-0000-000000000001','a1a1a1a1-0001-4001-8001-000000000002', NULL, 8, 14, 0.500, false, NULL, 'Tarifa por Semana, días 8-14: 50%'),
+('00000000-0000-0000-0000-000000000001','a1a1a1a1-0001-4001-8001-000000000002', NULL, 15, 21, 0.500, false, NULL, 'Tarifa por Semana, días 15-21: 50%'),
+('00000000-0000-0000-0000-000000000001','a1a1a1a1-0001-4001-8001-000000000002', NULL, 22, 29, 0.500, false, NULL, 'Tarifa por Semana, días 22-29: 50%'),
+('00000000-0000-0000-0000-000000000001','a1a1a1a1-0001-4001-8001-000000000003', NULL, 30, 365, 1.000, true, 30, 'Tarifa por Mes: prorrateado, sueldo_base / 30 × días del periodo (no usa factor_sueldo)');
+
+INSERT INTO tp_sueldos_matriciales (tenant_id, puesto_id, tipo_complejidad_id, tipo_duracion_id, fase_evento_id, fase_evento_str, turnos, sueldo_base, factor, vigente_desde) VALUES
+('00000000-0000-0000-0000-000000000001','be86586d-e8af-4030-a461-5402c95f2cf7','b81657d7-41b5-46bb-a693-7831e02cfc98','a1a1a1a1-0001-4001-8001-000000000001', NULL, NULL, 1, 30200.00, 1.000, '2018-01-01'),
+('00000000-0000-0000-0000-000000000001','be86586d-e8af-4030-a461-5402c95f2cf7','e4e32332-5b79-4756-b5cf-3ba4c9d8f909','a1a1a1a1-0001-4001-8001-000000000001', NULL, NULL, 1, 45500.00, 1.000, '2018-01-01'),
+('00000000-0000-0000-0000-000000000001','be86586d-e8af-4030-a461-5402c95f2cf7','d7cd0fe7-8dba-452d-be8e-281c83b51f2f','a1a1a1a1-0001-4001-8001-000000000001', NULL, NULL, 1, 91800.00, 1.000, '2018-01-01'),
+('00000000-0000-0000-0000-000000000001','be86586d-e8af-4030-a461-5402c95f2cf7','ec81d9ea-1ea7-4319-9422-93f2008c35ab','a1a1a1a1-0001-4001-8001-000000000001', NULL, NULL, 1, 102000.00, 1.000, '2018-01-01'),
+('00000000-0000-0000-0000-000000000001','be86586d-e8af-4030-a461-5402c95f2cf7','3e8553a0-82db-4d49-b269-39fdc507f7b5','a1a1a1a1-0001-4001-8001-000000000001', NULL, NULL, 1, 121000.00, 1.000, '2018-01-01'),
+('00000000-0000-0000-0000-000000000001','d446afb2-1a6c-4165-906f-9722f6bf7cac','632d6ec3-0cac-4b57-a8bb-1049860ff05d','a1a1a1a1-0001-4001-8001-000000000001', NULL, NULL, 1, 9700.00, 1.000, '2018-01-01'),
+('00000000-0000-0000-0000-000000000001','d446afb2-1a6c-4165-906f-9722f6bf7cac','b81657d7-41b5-46bb-a693-7831e02cfc98','a1a1a1a1-0001-4001-8001-000000000001', NULL, NULL, 1, 14500.00, 1.000, '2018-01-01'),
+('00000000-0000-0000-0000-000000000001','d446afb2-1a6c-4165-906f-9722f6bf7cac','e4e32332-5b79-4756-b5cf-3ba4c9d8f909','a1a1a1a1-0001-4001-8001-000000000001', NULL, NULL, 1, 21800.00, 1.000, '2018-01-01'),
+('00000000-0000-0000-0000-000000000001','d446afb2-1a6c-4165-906f-9722f6bf7cac','d7cd0fe7-8dba-452d-be8e-281c83b51f2f','a1a1a1a1-0001-4001-8001-000000000001', NULL, NULL, 1, 44000.00, 1.000, '2018-01-01'),
+('00000000-0000-0000-0000-000000000001','675816cf-46bd-4f6c-8580-398dcc7b36fc', NULL, NULL, NULL, 'Fase 1 Runner (Día 1)', 1, 1400.00, 1.000, '2018-02-12'),
+('00000000-0000-0000-0000-000000000001','675816cf-46bd-4f6c-8580-398dcc7b36fc', NULL, NULL, NULL, 'Fase 2 Runner (Día 2)', 1, 2800.00, 1.000, '2018-02-12'),
+('00000000-0000-0000-0000-000000000001','675816cf-46bd-4f6c-8580-398dcc7b36fc', NULL, NULL, NULL, 'Fase 3 Runner (Día 3)', 1, 4200.00, 1.000, '2018-02-12'),
+('00000000-0000-0000-0000-000000000001','675816cf-46bd-4f6c-8580-398dcc7b36fc', NULL, NULL, NULL, 'Fase 4 Runner (Día 4)', 1, 5600.00, 1.000, '2018-02-12'),
+('00000000-0000-0000-0000-000000000001','675816cf-46bd-4f6c-8580-398dcc7b36fc', NULL, NULL, NULL, 'Fase 5 Runner (Día 5)', 1, 6650.00, 1.000, '2018-02-12'),
+('00000000-0000-0000-0000-000000000001','675816cf-46bd-4f6c-8580-398dcc7b36fc', NULL, NULL, NULL, 'Fase 6 Runner (Día 6)', 1, 7350.00, 1.000, '2018-02-12'),
+('00000000-0000-0000-0000-000000000001','675816cf-46bd-4f6c-8580-398dcc7b36fc', NULL, NULL, NULL, 'Fase 7 Runner (Día 7)', 1, 7700.00, 1.000, '2018-02-12'),
+('00000000-0000-0000-0000-000000000001','675816cf-46bd-4f6c-8580-398dcc7b36fc', NULL, NULL, NULL, 'Fase 8 Runner (Día 8)', 1, 8048.00, 1.000, '2018-02-12'),
+('00000000-0000-0000-0000-000000000001','675816cf-46bd-4f6c-8580-398dcc7b36fc', NULL, NULL, NULL, 'Fase 9 Runner (Día 9)', 1, 8397.00, 1.000, '2018-02-12'),
+('00000000-0000-0000-0000-000000000001','675816cf-46bd-4f6c-8580-398dcc7b36fc', NULL, NULL, NULL, 'Fase 10 Runner (Día 10)', 1, 8750.00, 1.000, '2018-02-12'),
+('00000000-0000-0000-0000-000000000001','675816cf-46bd-4f6c-8580-398dcc7b36fc', NULL, NULL, NULL, 'Fase 11 Runner (Día 11)', 1, 9097.00, 1.000, '2018-02-12'),
+('00000000-0000-0000-0000-000000000001','675816cf-46bd-4f6c-8580-398dcc7b36fc', NULL, NULL, NULL, 'Fase 12 Runner (Día 12)', 1, 9444.00, 1.000, '2018-02-12'),
+('00000000-0000-0000-0000-000000000001','675816cf-46bd-4f6c-8580-398dcc7b36fc', NULL, NULL, NULL, 'Fase 13 Runner (Día 13)', 1, 9802.00, 1.000, '2018-02-12'),
+('00000000-0000-0000-0000-000000000001','675816cf-46bd-4f6c-8580-398dcc7b36fc', NULL, NULL, NULL, 'Fase 14 Runner (Día 14)', 1, 10150.00, 1.000, '2018-02-12'),
+('00000000-0000-0000-0000-000000000001','675816cf-46bd-4f6c-8580-398dcc7b36fc', NULL, NULL, NULL, 'Fase 15 Runner (Día 15)', 1, 10500.00, 1.000, '2018-02-12'),
+('00000000-0000-0000-0000-000000000001','675816cf-46bd-4f6c-8580-398dcc7b36fc', NULL, NULL, NULL, 'Fase 16 Runner (Día 16)', 1, 10848.00, 1.000, '2018-02-12'),
+('00000000-0000-0000-0000-000000000001','675816cf-46bd-4f6c-8580-398dcc7b36fc', NULL, NULL, NULL, 'Fase 17 Runner (Día 17)', 1, 11526.00, 1.000, '2018-02-12'),
+('00000000-0000-0000-0000-000000000001','675816cf-46bd-4f6c-8580-398dcc7b36fc', NULL, NULL, NULL, 'Fase 18 Runner (Día 18)', 1, 12204.00, 1.000, '2018-02-12'),
+('00000000-0000-0000-0000-000000000001','675816cf-46bd-4f6c-8580-398dcc7b36fc', NULL, NULL, NULL, 'Fase 19 Runner (Día 19)', 1, 12204.00, 1.000, '2018-02-12'),
+('00000000-0000-0000-0000-000000000001','675816cf-46bd-4f6c-8580-398dcc7b36fc', NULL, NULL, NULL, 'Fase 20 Runner (Día 20)', 1, 12204.00, 1.000, '2018-02-12'),
+('00000000-0000-0000-0000-000000000001','675816cf-46bd-4f6c-8580-398dcc7b36fc', NULL, NULL, NULL, 'Fase 21 Runner (Día 21)', 1, 12204.00, 1.000, '2018-02-12'),
+('00000000-0000-0000-0000-000000000001','675816cf-46bd-4f6c-8580-398dcc7b36fc', NULL, NULL, NULL, 'Fase 22 Runner (Día 22)', 1, 12204.00, 1.000, '2018-02-12'),
+('00000000-0000-0000-0000-000000000001','675816cf-46bd-4f6c-8580-398dcc7b36fc', NULL, NULL, NULL, 'Fase 23 Runner (Día 23)', 1, 12204.00, 1.000, '2018-02-12'),
+('00000000-0000-0000-0000-000000000001','675816cf-46bd-4f6c-8580-398dcc7b36fc', NULL, NULL, NULL, 'Fase 24 Runner (Día 24)', 1, 12204.00, 1.000, '2018-02-12'),
+('00000000-0000-0000-0000-000000000001','675816cf-46bd-4f6c-8580-398dcc7b36fc', NULL, NULL, NULL, 'Fase 25 Runner (Día 25)', 1, 12204.00, 1.000, '2018-02-12'),
+('00000000-0000-0000-0000-000000000001','675816cf-46bd-4f6c-8580-398dcc7b36fc', NULL, NULL, NULL, 'Fase 26 Runner (Día 26)', 1, 12204.00, 1.000, '2018-02-12'),
+('00000000-0000-0000-0000-000000000001','675816cf-46bd-4f6c-8580-398dcc7b36fc', NULL, NULL, NULL, 'Fase 27 Runner (Día 27)', 1, 12204.00, 1.000, '2018-02-12'),
+('00000000-0000-0000-0000-000000000001','675816cf-46bd-4f6c-8580-398dcc7b36fc', NULL, NULL, NULL, 'Fase 28 Runner (Día 28)', 1, 12204.00, 1.000, '2018-02-12'),
+('00000000-0000-0000-0000-000000000001','675816cf-46bd-4f6c-8580-398dcc7b36fc', NULL, NULL, NULL, 'Fase 29 Runner (Día 29)', 1, 12204.00, 1.000, '2018-02-12'),
+('00000000-0000-0000-0000-000000000001','675816cf-46bd-4f6c-8580-398dcc7b36fc', NULL, NULL, NULL, 'Fase 30 Runner (Día 30)', 1, 12204.00, 1.000, '2018-02-12'),
+('00000000-0000-0000-0000-000000000001','ab93943e-0967-4082-9354-cd2efe36eb9e', NULL, NULL, NULL, 'Fase 1 (de 1 a 4 días)', 1, 1300.00, 1.000, '2008-08-22'),
+('00000000-0000-0000-0000-000000000001','ab93943e-0967-4082-9354-cd2efe36eb9e', NULL, NULL, NULL, 'Fase 2 (Quinto Día)', 1, 975.00, 1.000, '2008-08-22'),
+('00000000-0000-0000-0000-000000000001','ab93943e-0967-4082-9354-cd2efe36eb9e', NULL, NULL, NULL, 'Fase 3 (Sexto Día)', 1, 650.00, 1.000, '2008-08-22'),
+('00000000-0000-0000-0000-000000000001','ab93943e-0967-4082-9354-cd2efe36eb9e', NULL, NULL, NULL, 'Fase 4 (Septimo Día en adelante)', 1, 325.00, 1.000, '2008-08-22'),
+('00000000-0000-0000-0000-000000000001','ab93943e-0967-4082-9354-cd2efe36eb9e', NULL, NULL, '9a97d694-d449-4e4b-acdd-c53814003604', NULL, 1, 1300.00, 1.000, '2008-08-22'),
+('00000000-0000-0000-0000-000000000001','ab93943e-0967-4082-9354-cd2efe36eb9e', NULL, NULL, '49cc39bc-565f-4a38-b0b5-c56fbafe8a93', NULL, 1, 865.00, 1.000, '2008-08-22'),
+('00000000-0000-0000-0000-000000000001','ab93943e-0967-4082-9354-cd2efe36eb9e', NULL, NULL, 'e56ed52e-d62d-457c-a402-7be8d15796cc', NULL, 1, 865.00, 1.000, '2008-08-22'),
+('00000000-0000-0000-0000-000000000001','ab93943e-0967-4082-9354-cd2efe36eb9e', NULL, NULL, 'bfdba95a-f3d4-45ae-b6b8-af4be2552fef', NULL, 1, 865.00, 1.000, '2008-08-22'),
+('00000000-0000-0000-0000-000000000001','0334a343-dd36-408c-acc4-75954501f9b4', NULL, NULL, NULL, 'Fase 1 (de 1 a 4 días)', 1, 865.00, 1.000, '2008-08-22'),
+('00000000-0000-0000-0000-000000000001','0334a343-dd36-408c-acc4-75954501f9b4', NULL, NULL, NULL, 'Fase 2 (Quinto Día)', 1, 650.00, 1.000, '2008-08-22'),
+('00000000-0000-0000-0000-000000000001','0334a343-dd36-408c-acc4-75954501f9b4', NULL, NULL, NULL, 'Fase 3 (Sexto Día)', 1, 435.00, 1.000, '2008-08-22'),
+('00000000-0000-0000-0000-000000000001','0334a343-dd36-408c-acc4-75954501f9b4', NULL, NULL, NULL, 'Fase 4 (Septimo Día en adelante)', 1, 220.00, 1.000, '2008-08-22'),
+('00000000-0000-0000-0000-000000000001','0334a343-dd36-408c-acc4-75954501f9b4', NULL, NULL, '9a97d694-d449-4e4b-acdd-c53814003604', NULL, 1, 865.00, 1.000, '2008-08-22'),
+('00000000-0000-0000-0000-000000000001','0334a343-dd36-408c-acc4-75954501f9b4', NULL, NULL, '49cc39bc-565f-4a38-b0b5-c56fbafe8a93', NULL, 1, 650.00, 1.000, '2008-08-22'),
+('00000000-0000-0000-0000-000000000001','0334a343-dd36-408c-acc4-75954501f9b4', NULL, NULL, 'e56ed52e-d62d-457c-a402-7be8d15796cc', NULL, 1, 650.00, 1.000, '2008-08-22');
+
+CREATE OR REPLACE FUNCTION cancelacion_automatica_preasignados()
+RETURNS int AS $$
+DECLARE n int := 0; p tp_parametros_globales;
+BEGIN
+  FOR p IN SELECT * FROM tp_parametros_globales LOOP
+    WITH cancelaciones AS (
+      UPDATE te_reservaciones r SET estado='cancelado', regla_aplicada='PRC_CancelacionAutomaticaPreasignados'
+      WHERE r.tenant_id=p.tenant_id AND r.estado='confirmado_opcional'
+        AND (r.cita_inicio - now()) < (p.horas_lookahead_autocancel||' hours')::interval
+        AND (now() - r.creado_en) > (p.horas_gracia_confirmacion||' hours')::interval
+        AND NOT EXISTS (
+          SELECT 1 FROM tc_puestos pu
+          JOIN tc_unidades_negocio un ON un.id = pu.id_unidad_negocio
+          WHERE pu.id = r.puesto_id AND un.titulo IN ('Produccion','Producción','PRG')
+        )
+      RETURNING r.id
+    ) SELECT n + count(*) INTO n FROM cancelaciones;
+  END LOOP;
+  RETURN n;
+END $$ LANGUAGE plpgsql;
