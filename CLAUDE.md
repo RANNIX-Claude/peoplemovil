@@ -4,8 +4,8 @@ Este archivo es el "contrato de trabajo" para futuras sesiones.
 
 ## 1. Estado del workspace (2026-10-08)
 
-- **Repo git:** conectado a `github.com/irpdesarrollo/peoplemovil`. Ver `git log` para historial de commits.
-- **Netlify:** sitio **https://peoplemovil-app.netlify.app** ligado por Git (push a la rama principal dispara deploy automático). Ya no requiere `netlify deploy` manual.
+- **Repo git:** remoto `origin` cambiado el 2026-10-08 a `github.com/RANNIX-Claude/peoplemovil` (antes `github.com/irpdesarrollo/peoplemovil`, que sigue existiendo con toda la historia hasta ese punto, renombrado localmente a `irpdesarrollo-antiguo`). El cambio fue porque el token embebido en el remoto viejo expiraba a media sesión y bloqueaba el push; `RANNIX-Claude/peoplemovil` usa el login interactivo de Git Credential Manager de la máquina, más estable. Se migró toda la historia (11 commits) con `git push`. Ver `git remote -v` para confirmar.
+- **⚠️ Netlify del sitio real (`https://peoplemovil-app.netlify.app`) sigue ligado por Git al repo VIEJO (`irpdesarrollo/peoplemovil`)** — no se pudo reconectar automáticamente porque el conector de Netlify de esta sesión apunta a una cuenta/equipo distinto (ve otros 2 sitios: `peoplemovil`, `peoplemovil01`, ninguno es el real). **Hasta que el usuario reconecte manualmente el repo en el dashboard de Netlify (Site settings → Build & deploy → Link to a different repository → `RANNIX-Claude/peoplemovil`), un push a `origin` (el repo nuevo) NO dispara el deploy automático del sitio real.** Mientras tanto, usar `netlify deploy --prod` manual (ver §6) o seguir empujando también a `irpdesarrollo-antiguo` si su token vuelve a funcionar.
 - **Prompt A NO se ejecutó previamente en `/Dev`**. Todo (tenant, suscripciones, dimensiones de tiempo, catálogos, personas, operativos, fiscal, UI) fue construido de cero en este ciclo Fase 2-5. Decisión documentada en D1 abajo.
 - **Layout final:**
   - `/db/reset_database.sql` — schema completo + funciones/triggers + RLS + seeds + migraciones 001-017 (ver §7).
