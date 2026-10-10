@@ -4,6 +4,7 @@ import Modal from '../../components/ui/Modal.jsx';
 import TablaWrap from '../../components/ui/TablaWrap.jsx';
 import Badge from '../../components/ui/Badge.jsx';
 import KpiCard from '../../components/ui/KpiCard.jsx';
+import AnilloPorcentaje from '../../components/ui/AnilloPorcentaje.jsx';
 import Semaforo from '../../components/Semaforo.jsx';
 import { supabase, supabaseReady, DEMO_TENANT_ID } from '../../lib/supabase.js';
 import { useModuleAudit, logAccion } from '../../lib/audit.js';
@@ -616,18 +617,18 @@ export default function ExpedienteEmpleado() {
       }}>
         <div style={{ position: 'relative', cursor: 'pointer', flexShrink: 0 }} onClick={() => fotoInputRef.current?.click()} title="Cambiar foto">
           <div style={{
-            width: 64, height: 64, borderRadius: '50%', overflow: 'hidden',
+            width: 76, height: 76, borderRadius: '50%', overflow: 'hidden',
             background: 'rgba(255,255,255,.22)', border: '3px solid rgba(255,255,255,.55)',
             display: 'flex', alignItems: 'center', justifyContent: 'center',
           }}>
             {fotoResuelta
               ? <img src={fotoResuelta} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-              : <span style={{ fontSize: 22, fontWeight: 900, color: '#fff' }}>{iniciales(empleado.nombres, empleado.apellido_paterno)}</span>}
+              : <span style={{ fontSize: 26, fontWeight: 900, color: '#fff' }}>{iniciales(empleado.nombres, empleado.apellido_paterno)}</span>}
           </div>
           <span style={{
             position: 'absolute', bottom: -2, right: -2, background: '#fff', borderRadius: '50%',
-            width: 22, height: 22, display: 'flex', alignItems: 'center', justifyContent: 'center',
-            fontSize: 11, boxShadow: '0 1px 4px rgba(0,0,0,.35)',
+            width: 24, height: 24, display: 'flex', alignItems: 'center', justifyContent: 'center',
+            fontSize: 12, boxShadow: '0 1px 4px rgba(0,0,0,.35)',
           }}>📷</span>
           <input ref={fotoInputRef} type="file" accept="image/*" style={{ display: 'none' }} onChange={subirFoto} />
         </div>
@@ -636,13 +637,18 @@ export default function ExpedienteEmpleado() {
             <h1 style={{ color: '#fff', margin: 0 }}>{empleado.nombres} {empleado.apellido_paterno} {empleado.apellido_materno}</h1>
             <Badge estado={empleado.activo ? 'activo' : 'inactivo'}>{empleado.activo ? 'ACTIVO' : 'BAJA'}</Badge>
           </div>
-          <div style={{ color: 'rgba(255,255,255,.9)', fontSize: 13, marginTop: 4 }}>
-            #{empleado.folio} · {empleado.puesto?.titulo || 'Sin puesto'} · {empleado.sitio?.titulo || 'Sin sitio'}
+          <div style={{ color: 'rgba(255,255,255,.95)', fontSize: 14, fontWeight: 700, marginTop: 4 }}>
+            {empleado.puesto?.titulo || 'Sin puesto'}
           </div>
-          <div style={{ color: 'rgba(255,255,255,.8)', fontSize: 12, marginTop: 6 }}>
-            Alta: {fmtFecha(empleado.fecha_alta)} · Expediente {requeridosCubiertos.length}/{requeridos.length || 0} docs obligatorios · {totalDisponibles} días de vacaciones disponibles
+          <div style={{ color: 'rgba(255,255,255,.8)', fontSize: 12, marginTop: 8, display: 'flex', gap: 14, flexWrap: 'wrap' }}>
+            {empleado.telefono && <span>📞 {empleado.telefono}</span>}
+            <span>🪪 #{empleado.folio}</span>
+            <span>📅 Desde {fmtFecha(empleado.fecha_alta)}</span>
+            <span>📍 {empleado.sitio?.titulo || 'Sin sitio'}</span>
           </div>
         </div>
+        <AnilloPorcentaje porcentaje={pctExpediente} size={64} fgColor="#fff" trackColor="rgba(255,255,255,.3)"
+          label={`Expediente\n${requeridosCubiertos.length}/${requeridos.length} docs`} />
       </div>
 
       {msg && <p style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 12 }}>{msg}</p>}

@@ -6,6 +6,7 @@ import Badge from '../components/ui/Badge.jsx';
 import Chip from '../components/ui/Chip.jsx';
 import KpiCard from '../components/ui/KpiCard.jsx';
 import ToggleVista from '../components/ui/ToggleVista.jsx';
+import AnilloPorcentaje from '../components/ui/AnilloPorcentaje.jsx';
 import { supabase, supabaseReady, DEMO_TENANT_ID } from '../lib/supabase.js';
 import { useModuleAudit, logAccion } from '../lib/audit.js';
 import { resolverUrlArchivo } from '../lib/storage.js';
@@ -19,19 +20,6 @@ function completitud(e) {
 
 function iniciales(nombres, apPat) {
   return `${(nombres || '?').trim()[0] || ''}${(apPat || '').trim()[0] || ''}`.toUpperCase();
-}
-
-// Anillo de porcentaje -- mismo umbral g/y/r que <Semaforo>, en formato
-// circular para el stats row de la tarjeta de empleado.
-function AnilloPorcentaje({ porcentaje, size = 40 }) {
-  const p = Number(porcentaje) || 0;
-  const color = p >= 0.8 ? 'var(--green)' : p >= 0.6 ? 'var(--gold)' : 'var(--red)';
-  const pct = Math.round(p * 100);
-  return (
-    <div className="anillo-pct" style={{ width: size, height: size, background: `conic-gradient(${color} ${pct}%, var(--border) 0)` }}>
-      <div className="anillo-pct-inner" style={{ width: size - 8, height: size - 8, fontSize: size * 0.26, color }}>{pct}%</div>
-    </div>
-  );
 }
 
 // Avatar con foto (resuelta bajo demanda, puede ser URL pública demo o path
