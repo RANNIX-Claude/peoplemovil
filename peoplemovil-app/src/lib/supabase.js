@@ -1,7 +1,9 @@
 import { createClient } from '@supabase/supabase-js';
 
-// En dev usa un tenant demo si no hay auth real. En producción, el JWT de Supabase Auth
-// setea app.current_tenant vía claim; aquí se envía como header en Netlify Functions.
+// Fallback para accesos SIN sesión (portal público de vacantes, demo sin login).
+// current_tenant_id() (ver Migración 025, db/reset_database.sql) ignora este header
+// por completo cuando hay una sesión autenticada -- en ese caso resuelve el tenant
+// real desde te_usuarios/te_empleados vía el JWT, nunca desde lo que mande el cliente.
 export const DEMO_TENANT_ID = '00000000-0000-0000-0000-000000000001';
 
 const url = import.meta.env.VITE_SUPABASE_URL || '';
