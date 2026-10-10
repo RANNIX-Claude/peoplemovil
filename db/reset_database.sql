@@ -7216,3 +7216,268 @@ SELECT cron.schedule(
 SELECT refrescar_dw_todo();
 
 -- ============================================================================
+-- Migración 031 -- Reglas reales de Alta de Pedidos / Alta de Pedido Detalle
+-- (correo 2026-10-10, auditadas contra el código) + backfill real de
+-- tc_puestos.matricial/id_unidad_negocio desde "Catalogos Sueldos
+-- Matriciales.xlsx" hoja "Puestos" (986 filas reales, columnas Matricial e
+-- IdUnidadDeNegocio -- nunca antes importadas; solo se habían usado las
+-- hojas de Sueldos Matriciales/Complejidad/Duración en la Migración 022).
+-- ============================================================================
+
+-- ---------------------------------------------------------------------------
+-- 1. BUG real: tc_partidas_presupuestales.id_lugar_predeterminado referenciaba
+--    tc_sitios en vez de tc_lugares_cita (regla "el Lugar de Cita se precarga
+--    con el default del PEP" nunca podía funcionar: el frontend asigna este
+--    valor a te_pedidos.lugar_cita_id, que es FK a tc_lugares_cita). Columna
+--    nunca se pobló en ningún PEP real, así que el cambio es seguro.
+-- ---------------------------------------------------------------------------
+DO $$
+DECLARE c text;
+BEGIN
+  SELECT con.conname INTO c
+  FROM pg_constraint con
+  JOIN pg_attribute att ON att.attrelid = con.conrelid AND att.attnum = con.conkey[1]
+  WHERE con.conrelid = 'tc_partidas_presupuestales'::regclass
+    AND con.contype = 'f' AND array_length(con.conkey,1) = 1
+    AND att.attname = 'id_lugar_predeterminado';
+  IF c IS NOT NULL THEN
+    EXECUTE format('ALTER TABLE tc_partidas_presupuestales DROP CONSTRAINT %I', c);
+  END IF;
+END $$;
+ALTER TABLE tc_partidas_presupuestales
+  ADD CONSTRAINT tc_pp_id_lugar_predeterminado_fkey FOREIGN KEY (id_lugar_predeterminado) REFERENCES tc_lugares_cita(id);
+
+-- ---------------------------------------------------------------------------
+-- 2. Unidades de negocio reales que faltaban (vistas en el Excel, nunca
+--    sembradas): Premios Oye, Asdeporte, Well Fit, Enlace, Estacionamientos,
+--    Limpieza -- 11 puestos reales les pertenecen.
+-- ---------------------------------------------------------------------------
+INSERT INTO tc_unidades_negocio (tenant_id, titulo)
+SELECT '00000000-0000-0000-0000-000000000001', t FROM (
+  VALUES ('Premios Oye'), ('Asdeporte'), ('Well Fit'), ('Enlace'), ('Estacionamientos'), ('Limpieza')
+) AS x(t)
+ON CONFLICT (tenant_id, titulo) DO NOTHING;
+
+-- ---------------------------------------------------------------------------
+-- 3. Backfill real de tc_puestos.matricial + id_unidad_negocio desde el
+--    Excel (match por título, 152/152 puestos del tenant eventos resueltos
+--    -- 0 sin match). matricial pasa de 9 puestos adivinados por QA (Migración
+--    021) a 51 reales confirmados por el catálogo legado.
+-- ---------------------------------------------------------------------------
+WITH datos(puesto_id, matricial, un_titulo) AS (
+  VALUES
+  ('b86c6512-3dc6-41f0-925b-fd8c816236f0'::uuid, true, 'Produccion'),
+  ('74e80fc9-ba61-43e3-a2d2-b45b22ef4659'::uuid, false, 'Produccion'),
+  ('160ce1f0-e56d-40d4-beb7-d1a59030baef'::uuid, true, 'Produccion'),
+  ('7d7daa4d-836d-49f1-9592-f7693cbc6342'::uuid, true, 'Produccion'),
+  ('63e89fe8-89a8-4f4e-abd6-41c6829d17b6'::uuid, true, 'Produccion'),
+  ('1cb58657-382a-4970-af8b-97fa84df34ac'::uuid, true, 'Produccion'),
+  ('0ca6722f-fb3b-44c3-bb9e-aa388afcdda6'::uuid, true, 'Produccion'),
+  ('f2be3f88-30c7-4811-9213-87b0f884e980'::uuid, true, 'Produccion'),
+  ('522f89ec-c672-40ce-aa3a-9d711ee1afaf'::uuid, true, 'Produccion'),
+  ('4994838b-b918-419c-8f1b-7165fd6985f1'::uuid, true, 'Produccion'),
+  ('3cfc42c4-b8ef-422c-8375-412b4473baf6'::uuid, true, 'Produccion'),
+  ('2f3ed6a8-aff7-4552-9da3-4f5db7e87c03'::uuid, true, 'Produccion'),
+  ('37dc56d6-04e6-4c12-9d4b-f492f1289fe8'::uuid, true, 'Produccion'),
+  ('b09fbc1e-0871-48a1-85b2-2baeacf39f5b'::uuid, true, 'Produccion'),
+  ('b9c4f8e2-a6a9-4895-91a9-c9fbd15d59fd'::uuid, true, 'Produccion'),
+  ('5c46a2bc-b264-4dbc-ade5-ad9ad631913f'::uuid, true, 'Produccion'),
+  ('eeb81a99-6918-4f3c-8827-aa1af74c829d'::uuid, true, 'Produccion'),
+  ('069e66d5-9d2c-4465-80cb-4cfdab49d44f'::uuid, true, 'Produccion'),
+  ('7d7da1c2-b319-49ee-b9b7-062f7758a843'::uuid, true, 'Produccion'),
+  ('6f5d1b67-a669-48bf-8f01-2f19bf8a2df9'::uuid, true, 'Produccion'),
+  ('23ef90da-97c2-4390-a6a5-435d0093de67'::uuid, true, 'Produccion'),
+  ('3f1057e6-7fcd-4858-bf74-f5ffe7ad6e8c'::uuid, true, 'Produccion'),
+  ('58e70ecf-ee43-462f-9fac-bb4eee3ec495'::uuid, false, 'Produccion'),
+  ('b6692532-84de-4f7b-a30b-98ff9a77aa49'::uuid, false, 'Produccion'),
+  ('b306ccc2-c45d-435b-9a4b-171f7e7c0d06'::uuid, true, 'Produccion'),
+  ('b1ab363d-bf1b-46c5-96cc-cd253101de72'::uuid, true, 'Produccion'),
+  ('3d789b78-85c6-4bb4-bf89-74bb523badbf'::uuid, true, 'Produccion'),
+  ('237184db-2f46-4da7-b979-b71651b57680'::uuid, false, 'Produccion'),
+  ('916b0296-4bf6-412d-82d0-2cc1e0481051'::uuid, false, 'Produccion'),
+  ('2725060f-40b0-4b0c-a593-eaa624afc850'::uuid, false, 'Produccion'),
+  ('f612c5e2-0569-4bc9-a2c1-7ba8879457ee'::uuid, false, 'Produccion'),
+  ('7eee0b7e-09d2-47fd-961c-4caa9573c988'::uuid, false, 'Teatros y Salones'),
+  ('f19aa0bf-e348-4d2d-9c0d-70826f96430a'::uuid, false, 'Teatros y Salones'),
+  ('08bc957f-2860-4816-8d82-fa45397e7fce'::uuid, false, 'Teatros y Salones'),
+  ('358688df-323c-4f00-b7b7-8cb98669caa2'::uuid, false, 'Teatros y Salones'),
+  ('c002974e-000f-4bd8-835b-45d2f8fbd5b1'::uuid, false, 'Teatros y Salones'),
+  ('e9f68656-72dd-4b26-ba50-b9ecde05e46c'::uuid, true, 'Teatros y Salones'),
+  ('8efc9381-7cbf-480b-a2e9-1011b5c7ffca'::uuid, false, 'SEI Track'),
+  ('b388f3d8-903f-4041-86c0-fa80a52ae57a'::uuid, false, 'Produccion'),
+  ('3a35a7a0-08a7-479d-9ea4-3142308da8e5'::uuid, false, 'Operaciones Inmuebles Auditorio Banamex Mty'),
+  ('1d88dc5e-08eb-44ff-aca3-7d5d352a8028'::uuid, false, 'Well Fit'),
+  ('ee78fe9a-f462-4929-aa65-387d8cdeabf7'::uuid, false, 'Enlace'),
+  ('a40ace87-9536-4030-b50d-715642dc8899'::uuid, false, 'Premios Oye'),
+  ('1d04bf55-8a5d-477e-b113-cb02ec1ee0f9'::uuid, false, 'Premios Oye'),
+  ('6d4a0ee3-1f9c-4e19-ad46-c0c0b94c143f'::uuid, false, 'Premios Oye'),
+  ('14f47320-ae62-4a1f-97f3-bbefc24a91bb'::uuid, false, 'Premios Oye'),
+  ('d4555371-c7ab-4fe5-a0dd-b9ea03a3f660'::uuid, false, 'Premios Oye'),
+  ('730912a1-2d55-441a-b783-8be958136865'::uuid, false, 'Teatros y Salones'),
+  ('5bc18fb9-b863-4cf6-a0e1-f2f8f632e2ac'::uuid, false, 'Seguridad'),
+  ('29292b84-a125-4593-936e-cd7fb26fd7de'::uuid, false, 'Control de Accesos'),
+  ('e9c504b5-30bc-43e4-b99c-722187e4c3fa'::uuid, false, 'Control de Accesos'),
+  ('14acde63-1d2d-43ca-8b07-73212b2cb030'::uuid, false, 'Anfitriones'),
+  ('207b44cc-fc59-46ab-8a49-99a18c30aae3'::uuid, false, 'Taquillas'),
+  ('31934832-050f-48fc-aeec-191ecb4ca845'::uuid, false, 'Estacionamientos'),
+  ('7d1dd5ef-ff20-4894-9b9d-290af6a9db1f'::uuid, false, 'Limpieza'),
+  ('6620e30e-63a0-4ae3-9cc4-d411a6a0f847'::uuid, false, 'Operaciones Inmuebles'),
+  ('4f718d43-6dec-4076-a757-db0ee42f0802'::uuid, false, 'Operaciones Inmuebles'),
+  ('d360a15f-44e3-4563-9591-dd67dce66936'::uuid, false, 'PRG'),
+  ('3992b79d-09f1-475a-a073-5d948da0da40'::uuid, false, 'Anfitriones'),
+  ('dbf49f2a-8656-41b9-92db-dcf86f65d55e'::uuid, false, 'Produccion'),
+  ('32c62e9b-f759-4e2b-b915-33c7455e51a6'::uuid, true, 'Produccion'),
+  ('96a5ec4d-e68f-46a3-8ab6-9b993a5cec90'::uuid, true, 'Produccion'),
+  ('05b06e2f-1e94-481c-94f5-575e95bfa222'::uuid, true, 'Produccion'),
+  ('feb0f58f-c278-4c18-888f-f60037f0ca39'::uuid, true, 'PRG'),
+  ('a1e46509-95f3-4ee2-b745-49ad0c4301f6'::uuid, false, 'Produccion'),
+  ('dc94b3a9-41ef-4424-bac6-78af37c385c7'::uuid, true, 'Produccion'),
+  ('c651cc2e-8d05-4560-888b-d277546cc32c'::uuid, true, 'Produccion'),
+  ('217f5334-5f44-46a3-8f61-3b4f53fd657e'::uuid, true, 'Produccion'),
+  ('24b9ffb9-33e6-4f98-8972-2db4626eced7'::uuid, true, 'Produccion'),
+  ('07f08662-bafe-4747-8ef1-23319d4ef7c0'::uuid, true, 'Produccion'),
+  ('ee9b9f0d-0edb-45f9-b4d9-19ec1bce4bd5'::uuid, true, 'Produccion'),
+  ('d6a97550-d504-4034-924c-b36032246a73'::uuid, false, 'PRG'),
+  ('6495021d-1ae6-42f4-8431-72253f97348d'::uuid, false, 'Sistemas'),
+  ('3ccc8ff4-9f81-4efb-aee0-f77c455848b5'::uuid, false, 'Teatros y Salones'),
+  ('df750c4d-1d10-410a-887d-49591a5341fd'::uuid, false, 'Teatros y Salones'),
+  ('922b0f8c-dbdc-402a-839d-dc9caa2ac16b'::uuid, false, 'PRG'),
+  ('a7ed6c7c-398e-4a17-b866-36f984351401'::uuid, false, 'PRG'),
+  ('4d2c1e5a-de5f-4be4-abfb-0a5492fb5cc2'::uuid, false, 'Obras de Teatro'),
+  ('09dacbed-f332-487c-87f6-738b5232ba85'::uuid, false, 'Taquillas'),
+  ('78ea5d47-f43d-49e7-91a1-c3b57a02c98a'::uuid, false, 'Seguridad'),
+  ('c7da7017-8717-4f0b-b480-c2291ea6a060'::uuid, false, 'Seguridad'),
+  ('1ba1d095-de6d-41fb-81f3-b2a44a2cc864'::uuid, false, 'Seguridad'),
+  ('0d3af7d4-9ff9-4096-89c2-3c7117e2a915'::uuid, false, 'Operaciones Inmuebles'),
+  ('8da3d3dc-ac8d-4b4a-a5d2-b3965a6f06a5'::uuid, false, 'Marketing Monterrey'),
+  ('26c8159e-8167-4558-a186-27213c82f29a'::uuid, false, 'Marketing Monterrey'),
+  ('4b477247-2f81-420a-9374-f2cc49094fd8'::uuid, false, 'Produccion'),
+  ('8d1fd380-94a3-44c8-9599-5f3eaf501cc7'::uuid, false, 'PRG'),
+  ('fee51d58-6e5c-46c3-9861-986e3c2eee4e'::uuid, false, 'PRG'),
+  ('b83cad0c-0458-4a4a-8244-f6d79f4f3c2c'::uuid, false, 'PRG'),
+  ('4e1e1453-61ff-42ba-95d0-710b93cccb7f'::uuid, false, 'PRG'),
+  ('afb42782-0768-4a00-bede-cfaeee67ce2a'::uuid, false, 'PRG'),
+  ('4057954a-59d9-43ae-9aaf-eccca4243a25'::uuid, false, 'PRG'),
+  ('6732b6b3-e4d2-4877-b73a-71ee56958095'::uuid, false, 'PRG'),
+  ('ec4e8c81-71bf-446d-800b-e4b864ca438a'::uuid, false, 'PRG'),
+  ('7799dec4-cd11-49d4-a4e4-e11463328ab5'::uuid, false, 'Prensa'),
+  ('d8d15a72-2c06-4a4e-a159-a157322d0ea7'::uuid, false, 'PRG'),
+  ('651d00f6-19ab-4c5f-9bc5-791aad8c8f01'::uuid, true, 'PRG'),
+  ('d38c5bee-0c26-4fc1-b03d-9c919780d11c'::uuid, false, 'PRG'),
+  ('2113382a-396d-4fd5-979b-8faeac064730'::uuid, true, 'PRG'),
+  ('625bd3ea-e445-472d-9bf9-459a70ea0346'::uuid, false, 'Eventos Especiales'),
+  ('7004ac60-e574-4535-9174-011424122674'::uuid, false, 'Seguridad'),
+  ('51c7f5ba-f3fb-4cf7-9f9f-10f22a192f08'::uuid, true, 'PRG'),
+  ('07aa0f3a-fde4-4fae-be39-9906273c9bfe'::uuid, true, 'PRG'),
+  ('b3d94c9b-8b59-4316-a04f-95e666826b8d'::uuid, false, 'PRG'),
+  ('cc1fecb7-8fe6-493e-9848-c71054629c2f'::uuid, false, 'PRG'),
+  ('68353934-426f-4662-9d03-eec6d7611b5a'::uuid, false, 'Operaciones Inmuebles'),
+  ('80c59aa2-46a3-4e22-81d4-ee48801d66a0'::uuid, false, 'Operaciones Inmuebles'),
+  ('271f384a-51ec-47d5-bdd9-1da29fecf061'::uuid, false, 'Operaciones Inmuebles'),
+  ('648e7f0c-c2e0-47b6-ab90-29ddd6628bf6'::uuid, false, 'Formula 1'),
+  ('5b06ffb4-fa29-4fd2-9325-472840e1fe90'::uuid, false, 'Operaciones Inmuebles VFG'),
+  ('66513c31-7363-45b2-a4b3-795b180d43d0'::uuid, false, 'Produccion'),
+  ('3e2ba48d-2296-468f-be07-37dbb85d0977'::uuid, false, 'Taquillas'),
+  ('2237e68f-f064-4a02-b843-377cfb731ee7'::uuid, false, 'Taquillas'),
+  ('d1c2cad0-f6de-4320-94e6-814a16bc02de'::uuid, false, 'Teatros y Salones'),
+  ('396c21b6-58a6-4ee1-9f21-4a25a7f881e9'::uuid, false, 'Teatros y Salones'),
+  ('cc777e8c-feec-440c-b8e4-06f4e58c274c'::uuid, false, 'Seguridad'),
+  ('f4983d8c-f961-45ec-863d-84c39a8c978a'::uuid, false, 'Operaciones Inmuebles VFG'),
+  ('133e0cca-017d-471a-8f2d-eaf87c935d55'::uuid, false, 'Operaciones Inmuebles'),
+  ('591a00a4-57da-496a-b0fb-223b6fe3c48c'::uuid, false, 'Actividades Deportivas'),
+  ('aebbcb87-281f-4745-9506-2f5b71836604'::uuid, true, 'Asdeporte'),
+  ('8f80f854-c838-4c7b-8922-2494218e0a7b'::uuid, false, 'Actividades Deportivas'),
+  ('abd6d1aa-5ee2-45a0-a452-63d47b0bd213'::uuid, false, 'Actividades Deportivas'),
+  ('ddd75e6c-3d37-4557-aac8-a75dbe90074f'::uuid, false, 'Actividades Deportivas'),
+  ('6eb2a9a8-4071-4701-946e-f49820a889ae'::uuid, false, 'Transportes'),
+  ('bebb353a-4a5e-422c-bb61-33ea46660762'::uuid, false, 'Operaciones Inmuebles'),
+  ('d952a19c-782e-445d-9d86-f00d0a3dddea'::uuid, false, 'Produccion'),
+  ('84b8fa62-8ac4-4c33-9bfc-591e76af1a16'::uuid, false, 'Operaciones Inmuebles VFG'),
+  ('7722e539-ae68-487d-98c9-4953902d3414'::uuid, false, 'Operaciones Inmuebles VFG'),
+  ('10cf7eed-f22a-469e-b74b-40cee1a2f710'::uuid, false, 'Operaciones Inmuebles VFG'),
+  ('80b6c0db-2a4e-47a8-9a38-899d26b7a260'::uuid, false, 'Anfitriones'),
+  ('c54810b0-8f46-47fe-a501-600f32e1aeda'::uuid, false, 'Cirque Du Soleil'),
+  ('8ae40982-fc9a-41cd-9c17-13b3c529fdb3'::uuid, false, 'Cirque Du Soleil'),
+  ('96f46854-3095-4b72-823c-f61de3618fde'::uuid, false, 'Cirque Du Soleil'),
+  ('8cdd2bbf-6ce1-4b5e-8c11-7335afe37285'::uuid, false, 'Cirque Du Soleil'),
+  ('6743e4ea-34db-46bf-b717-50a407b8785e'::uuid, true, 'PRG'),
+  ('6b1c268c-4c65-4a35-b294-c3cb11576b26'::uuid, false, 'Actividades Deportivas'),
+  ('be51e211-2b10-4ad1-a229-f402d84d86e2'::uuid, false, 'SEI Track'),
+  ('ce6642bb-ca38-4ba7-8423-b26241d9947c'::uuid, false, 'Produccion'),
+  ('a3e4c6a5-55c1-4c30-9123-2c2274ae50f6'::uuid, true, 'Asdeporte'),
+  ('1faf8227-07d9-4a30-8f32-b7f52b53232b'::uuid, false, 'PRG'),
+  ('3cd2379c-c6a7-4961-9776-f617b139aa85'::uuid, false, 'Operaciones Inmuebles'),
+  ('d446afb2-1a6c-4165-906f-9722f6bf7cac'::uuid, true, 'Produccion'),
+  ('9dc60613-0b51-47b3-b81d-6306cc8a7c43'::uuid, true, 'Produccion'),
+  ('bd1abb68-fa90-4187-9eff-cc13c175c605'::uuid, true, 'Produccion'),
+  ('4f5edafb-4ec5-4772-a65c-2fa591d91003'::uuid, true, 'Produccion'),
+  ('ab93943e-0967-4082-9354-cd2efe36eb9e'::uuid, true, 'Produccion'),
+  ('0334a343-dd36-408c-acc4-75954501f9b4'::uuid, true, 'Produccion'),
+  ('c53cf64c-36e3-44b8-b031-b2ab671c1468'::uuid, true, 'Produccion'),
+  ('be86586d-e8af-4030-a461-5402c95f2cf7'::uuid, true, 'Produccion'),
+  ('675816cf-46bd-4f6c-8580-398dcc7b36fc'::uuid, true, 'Produccion'),
+  ('83ba2d61-c67e-43b1-8692-21fd349a934d'::uuid, false, 'Operaciones Inmuebles VFG'),
+  ('319067f1-3358-46e6-9568-4f8576a68f7f'::uuid, false, 'Formula 1')
+)
+UPDATE tc_puestos p
+SET matricial = d.matricial,
+    id_unidad_negocio = un.id
+FROM datos d
+LEFT JOIN tc_unidades_negocio un ON un.tenant_id = '00000000-0000-0000-0000-000000000001' AND un.titulo = d.un_titulo
+WHERE p.id = d.puesto_id;
+
+-- ---------------------------------------------------------------------------
+-- 4. Uniformes: FK real a unidad de negocio (la que había,
+--    id_unidad_negocio_legacy, es un INT suelto sin FK -- se conserva para
+--    no perder el dato crudo, pero no sirve para filtrar). Sin backfill:
+--    los IDs legacy de tc_uniformes no tienen tabla de equivalencia con
+--    nuestros UUID de tc_unidades_negocio -- gap real, mismo criterio que
+--    tc_productos.id_puesto antes de resolverse. Las filas quedan en NULL
+--    hasta que se capture un uniforme nuevo desde la UI con su UN real.
+-- ---------------------------------------------------------------------------
+ALTER TABLE tc_uniformes
+  ADD COLUMN IF NOT EXISTS id_unidad_negocio uuid REFERENCES tc_unidades_negocio(id);
+
+-- ---------------------------------------------------------------------------
+-- 5. te_pedidos_detalle: FK a uniforme (regla "Alta Pedido Detalle" #6).
+-- ---------------------------------------------------------------------------
+ALTER TABLE te_pedidos_detalle
+  ADD COLUMN IF NOT EXISTS uniforme_id uuid REFERENCES tc_uniformes(id);
+
+-- ---------------------------------------------------------------------------
+-- 6. Validaciones de fecha en servidor (reglas Detalle #7/#8/#9) -- defensa
+--    en profundidad detrás de la validación JS. Solo se dispara cuando el
+--    INSERT/UPDATE efectivamente toca esas columnas (UPDATE OF ...), así que
+--    liberar/cancelar un renglón (que solo tocan status_detalle) no se ven
+--    afectados, y los datos demo existentes que nunca satisficieron estas
+--    reglas no se rompen retroactivamente.
+-- ---------------------------------------------------------------------------
+CREATE OR REPLACE FUNCTION tg_pedido_detalle_valida_fechas() RETURNS trigger AS $$
+DECLARE horas_gap numeric;
+BEGIN
+  IF NEW.fecha_liberacion IS NOT NULL AND NEW.fecha_cita IS NOT NULL
+     AND NEW.fecha_liberacion::date > NEW.fecha_cita THEN
+    RAISE EXCEPTION 'La fecha de liberación (%) no puede ser posterior a la fecha de cita (%).', NEW.fecha_liberacion::date, NEW.fecha_cita;
+  END IF;
+
+  IF NEW.fecha_final_cita IS NOT NULL AND NEW.fecha_cita IS NOT NULL
+     AND NEW.fecha_final_cita::date < NEW.fecha_cita THEN
+    RAISE EXCEPTION 'La fecha final (%) no puede ser anterior a la fecha de cita (%).', NEW.fecha_final_cita::date, NEW.fecha_cita;
+  END IF;
+
+  IF NEW.fecha_final_cita IS NOT NULL AND NEW.fecha_cita IS NOT NULL THEN
+    horas_gap := EXTRACT(epoch FROM (NEW.fecha_final_cita - (NEW.fecha_cita + COALESCE(NEW.hora_cita_inicio, '00:00'::time)))) / 3600.0;
+    IF horas_gap < 4 THEN
+      RAISE EXCEPTION 'Debe haber mínimo 4 horas entre la fecha/hora de la cita y la fecha final (actual: % horas).', round(horas_gap, 1);
+    END IF;
+  END IF;
+
+  RETURN NEW;
+END $$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS tg_peddet_valida_fechas ON te_pedidos_detalle;
+CREATE TRIGGER tg_peddet_valida_fechas
+  BEFORE INSERT OR UPDATE OF fecha_cita, fecha_final_cita, fecha_liberacion, hora_cita_inicio
+  ON te_pedidos_detalle FOR EACH ROW EXECUTE FUNCTION tg_pedido_detalle_valida_fechas();
+
+-- ============================================================================

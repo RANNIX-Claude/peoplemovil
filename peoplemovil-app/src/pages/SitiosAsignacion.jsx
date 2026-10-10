@@ -23,11 +23,23 @@ const PEDIDO_VACIO = {
 const DETALLE_VACIO = {
   id_tipo_personal: '', producto_id: '', puesto_id: '', cantidad: 1, turnos: 1,
   fecha_cita: '', hora_cita_inicio: '', hora_cita_fin: '', fecha_final_cita: '',
-  fecha_liberacion: '', presentacion_id: '', fase_evento_id: '',
+  fecha_liberacion: '', presentacion_id: '', fase_evento_id: '', uniforme_id: '',
   lugar_cita_id: '', lugar_otro: false, lugar_otro_descripcion: '',
   facturable: true, permitir_cancelar_confirmaciones: true,
   completar_productos_similares: false, indicaciones_especiales: ''
 };
+
+// Reglas reales "Alta de Pedidos"/"Alta de Pedido Detalle" (correo 2026-10-10,
+// auditadas contra este archivo -- ver CLAUDE.md §7 Migración 031).
+function horasEntre(inicioISO, finISO) {
+  return (new Date(finISO) - new Date(inicioISO)) / 3600000;
+}
+function calcularFechaFinal(fechaCita, horaInicio, turnos, duracionTurnoHoras) {
+  if (!fechaCita || !(Number(turnos) > 0)) return null;
+  const horas = Number(duracionTurnoHoras || 8) * Number(turnos);
+  const inicio = new Date(`${fechaCita}T${horaInicio || '00:00'}:00`);
+  return new Date(inicio.getTime() + horas * 3600000).toISOString();
+}
 
 // Vista 1: Lista de pedidos con toolbar (heredado del manual Pedidos)
 // Vista 2: Detalle de pedido — Registro (datos principales) + Matriz de puestos (agregar detalle) + Movimientos
@@ -61,6 +73,8 @@ export default function SitiosAsignacion() {
   const [puestos, setPuestos] = useState([]);
   const [presentaciones, setPresentaciones] = useState([]);
   const [fasesEvento, setFasesEvento] = useState([]);
+  const [uniformes, setUniformes] = useState([]);
+  const [sueldosMatriciales, setSueldosMatriciales] = useState([]); // {puesto_id, tipo_complejidad_id, fase_evento_id} -- de tp_sueldos_matriciales
 
   // --- ficha de pedido ---
   const [pedidoSel, setPedidoSel] = useState(null);
@@ -77,6 +91,7 @@ export default function SitiosAsignacion() {
   const [nuevoEventoTitulo, setNuevoEventoTitulo] = useState('');
   const [detalleOpen, setDetalleOpen] = useState(false);
   const [nuevoDetalle, setNuevoDetalle] = useState(DETALLE_VACIO);
+  const [fechasExtra, setFechasExtra] = useState([]); // fechas adicionales del BLOQUE (solo en alta, no en edición)
   const [editandoDetalleId, setEditandoDetalleId] = useState(null); // null = alta, id = editando ese te_pedidos_detalle
   const [celdaDetalle, setCeldaDetalle] = useState(null); // popup "Detalle" al dar click en una celda de la matriz
   const [menuCeldaId, setMenuCeldaId] = useState(null); // pedido_detalle_id con el menú contextual (Editar/Reservaciones/Cancelar/Liberar) abierto
@@ -89,7 +104,8 @@ export default function SitiosAsignacion() {
     const [
       { data: p }, { data: s }, { data: c }, { data: un }, { data: sp }, { data: spag },
       { data: tm }, { data: tcx }, { data: td }, { data: resp }, { data: lc },
-      { data: tper }, { data: prod }, { data: pues }, { data: pres }, { data: fev }
+      { data: tper }, { data: prod }, { data: pues }, { data: pres }, { data: fev },
+      { data: unif }, { data: smx }
     ] = await Promise.all([
       supabase.from('te_pedidos').select('*').order('fecha_evento', { ascending: false }).limit(100),
       supabase.from('tc_sitios').select('id, titulo, tipo_sitio, direccion_abreviada, activo').order('titulo'),
@@ -97,23 +113,25 @@ export default function SitiosAsignacion() {
       supabase.from('tc_unidades_negocio').select('id, titulo').eq('activo', true).order('titulo'),
       supabase.from('tc_sociedades_propias').select('id, titulo').order('titulo'),
       supabase.from('tc_sociedades_pagadoras').select('id, titulo').eq('activo', true).order('titulo'),
-      supabase.from('tc_tipos_movimiento_pedido').select('id, titulo, se_factura').eq('activo', true).order('titulo'),
+      supabase.from('tc_tipos_movimiento_pedido').select('id, titulo, clave, se_factura').eq('activo', true).order('titulo'),
       supabase.from('tc_tipos_complejidad').select('id, titulo').eq('activo', true).order('titulo'),
       supabase.from('tc_tipos_duracion_evento').select('id, titulo, dias_minimos, dias_maximos').eq('activo', true).order('titulo'),
       supabase.from('tc_responsables').select('id, nombre').order('nombre'),
       supabase.from('tc_lugares_cita').select('id, titulo, direccion').eq('activo', true).order('titulo'),
       supabase.from('tc_tipos_personal').select('id, clave, descripcion'),
       supabase.from('tc_productos').select('id, titulo, subcategoria, id_puesto').eq('vigente', true).order('titulo'),
-      supabase.from('tc_puestos').select('id, titulo, duracion_turno_horas').eq('activo', true).order('titulo'),
+      supabase.from('tc_puestos').select('id, titulo, duracion_turno_horas, matricial, id_unidad_negocio').eq('activo', true).order('titulo'),
       supabase.from('tc_presentaciones_producto').select('id, titulo').eq('activo', true).order('titulo'),
-      supabase.from('tc_fases_evento').select('id, clave, titulo, orden').order('orden')
+      supabase.from('tc_fases_evento').select('id, clave, titulo, orden').order('orden'),
+      supabase.from('tc_uniformes').select('id, titulo, id_unidad_negocio').order('titulo'),
+      supabase.from('tp_sueldos_matriciales').select('puesto_id, tipo_complejidad_id, fase_evento_id').eq('activo', true)
     ]);
     setPedidos(p || []); setSitios(s || []); setClientes(c || []);
     setUnidadesNegocio(un || []); setSociedadesPropias(sp || []); setSociedadesPagadoras(spag || []);
     setTiposMovimiento(tm || []); setTiposComplejidad(tcx || []); setTiposDuracion(td || []);
     setResponsables(resp || []); setLugaresCita(lc || []);
     setTiposPersonal(tper || []); setProductos(prod || []); setPuestos(pues || []); setPresentaciones(pres || []);
-    setFasesEvento(fev || []);
+    setFasesEvento(fev || []); setUniformes(unif || []); setSueldosMatriciales(smx || []);
   }
   useEffect(() => { cargar(); }, []);
 
@@ -150,6 +168,15 @@ export default function SitiosAsignacion() {
     }));
   };
 
+  // Regla "Alta de Pedidos" #8: la lista de Lugares de Cita muestra solo los
+  // vigentes, MÁS el que ya tiene asignado el PEP aunque ya no esté vigente.
+  useEffect(() => {
+    if (!supabaseReady || !nuevoPedido.lugar_cita_id) return;
+    if (lugaresCita.some(l => l.id === nuevoPedido.lugar_cita_id)) return;
+    supabase.from('tc_lugares_cita').select('id, titulo, direccion').eq('id', nuevoPedido.lugar_cita_id).maybeSingle()
+      .then(({ data }) => { if (data) setLugaresCita(prev => (prev.some(l => l.id === data.id) ? prev : [...prev, data])); });
+  }, [nuevoPedido.lugar_cita_id]);
+
   const crearEventoRapido = async () => {
     if (!nuevoEventoTitulo.trim() || !nuevoPedido.cliente_id) return;
     const { data, error } = await supabase.from('tc_eventos')
@@ -157,7 +184,8 @@ export default function SitiosAsignacion() {
       .select('id, titulo').single();
     if (error) { setMsg('❌ ' + error.message); return; }
     setEventos(prev => [...prev, data]);
-    setNuevoPedido(prev => ({ ...prev, evento_id: data.id }));
+    // Regla "Alta de Pedidos" #7: al elegir/crear un evento, el título del pedido se autocompleta.
+    setNuevoPedido(prev => ({ ...prev, evento_id: data.id, titulo: data.titulo }));
     setNuevoEventoTitulo('');
   };
 
@@ -257,6 +285,11 @@ export default function SitiosAsignacion() {
   const altaPedido = async (e) => {
     e.preventDefault();
     if (!nuevoPedido.sitio_id) { setMsg('❌ Falta sitio (seleccioná un PEP que tenga inmueble predeterminado, o elegí sitio manualmente).'); return; }
+    // Regla "Alta de Pedidos" #6: si hay complejidad, los días de show deben ser > 0.
+    if (nuevoPedido.tipo_complejidad_id && !(Number(nuevoPedido.duracion_dias) > 0)) {
+      setMsg('❌ Si elegís un tipo de complejidad, la duración (días de show) debe ser mayor a cero.');
+      return;
+    }
     const { data: folio, error: errFolio } = await supabase.rpc('siguiente_folio', { p_tenant: DEMO_TENANT_ID, p_tipo: 'pedido' });
     if (errFolio) { setMsg('❌ ' + errFolio.message); return; }
     const payload = {
@@ -308,28 +341,82 @@ export default function SitiosAsignacion() {
 
   const puestoDetalle = puestos.find(p => p.id === nuevoDetalle.puesto_id);
 
+  // Regla "Alta de Pedido Detalle" #1: el Tipo "Staff" solo aparece si el
+  // pedido tiene una complejidad asignada.
+  const tiposPersonalDisponibles = tiposPersonal.filter(t => t.clave !== 'staff' || !!pedidoSel?.tipo_complejidad_id);
+  const tipoPersonalSel = tiposPersonal.find(t => t.id === nuevoDetalle.id_tipo_personal);
+
+  // Reglas #2/#3: productos de Staff (puesto matricial, tarifado en Sueldos
+  // Matriciales para LA complejidad del pedido) vs. productos Operativos
+  // (puesto no matricial, de la misma unidad de negocio del pedido).
+  const puestosConMatrizComplejidad = new Set(
+    pedidoSel?.tipo_complejidad_id
+      ? sueldosMatriciales.filter(s => s.tipo_complejidad_id === pedidoSel.tipo_complejidad_id).map(s => s.puesto_id)
+      : []
+  );
+  const productosFiltrados = productos.filter(p => {
+    const pu = puestos.find(x => x.id === p.id_puesto);
+    if (tipoPersonalSel?.clave === 'staff') {
+      // Staff exige verificar matricial+complejidad -- un producto sin puesto
+      // asociado (65% del catálogo, ver CLAUDE.md §11) no se puede confirmar, así que aquí sí se oculta.
+      return !!pu && pu.matricial && puestosConMatrizComplejidad.has(pu.id);
+    }
+    if (!pu) return true; // Operativo: sin puesto asociado todavía -- no lo ocultamos (gap conocido)
+    if (pu.matricial) return false; // los matriciales solo se ofrecen bajo Tipo=Staff
+    return !pedidoSel?.unidad_negocio_id || !pu.id_unidad_negocio || pu.id_unidad_negocio === pedidoSel.unidad_negocio_id;
+  });
+
+  // Regla #3 (segunda mitad): si el puesto elegido tarifa por Fase de Evento
+  // en Sueldos Matriciales, restringir el combo a esas fases.
+  const fasesPorPuestoSel = new Set(
+    sueldosMatriciales.filter(s => s.puesto_id === nuevoDetalle.puesto_id && s.fase_evento_id).map(s => s.fase_evento_id)
+  );
+  const fasesDisponibles = fasesPorPuestoSel.size > 0 ? fasesEvento.filter(f => fasesPorPuestoSel.has(f.id)) : fasesEvento;
+
+  // Regla #6: uniformes según unidad de negocio del pedido (los que aún no
+  // tienen id_unidad_negocio mapeado -- catálogo legado sin esa FK -- se
+  // siguen mostrando para no ocultar el catálogo completo, ver CLAUDE.md).
+  const uniformesFiltrados = uniformes.filter(u => !pedidoSel?.unidad_negocio_id || !u.id_unidad_negocio || u.id_unidad_negocio === pedidoSel.unidad_negocio_id);
+
   const guardarDetalle = async (e) => {
     e.preventDefault();
     setMsgDetalle('');
     if (!nuevoDetalle.puesto_id) { setMsgDetalle('❌ Elegí un producto (define el puesto).'); return; }
+    // Regla #5: el lugar de cita (heredado del pedido) es obligatorio.
+    if (!nuevoDetalle.lugar_otro && !nuevoDetalle.lugar_cita_id) {
+      setMsgDetalle('❌ El lugar de cita es obligatorio.'); return;
+    }
+    if (nuevoDetalle.lugar_otro && !nuevoDetalle.lugar_otro_descripcion.trim()) {
+      setMsgDetalle('❌ Captura la dirección del lugar de cita ("Otro").'); return;
+    }
     if (nuevoDetalle.fecha_liberacion && nuevoDetalle.fecha_cita &&
         new Date(nuevoDetalle.fecha_liberacion) > new Date(nuevoDetalle.fecha_cita)) {
       setMsgDetalle('❌ La fecha de liberación no puede ser posterior a la fecha de cita.');
       return;
     }
-    const payload = {
+
+    // Regla #11: alta en bloque -- una o más fechas comparten todos los demás
+    // campos (cantidad, turnos, liberación, similares, etc.), cada una con su
+    // propia fecha_cita/fecha_final_cita, sin traslaparse entre sí. Solo
+    // aplica al dar de alta (no al editar un renglón existente).
+    const fechasBloque = editandoDetalleId
+      ? [nuevoDetalle.fecha_cita]
+      : Array.from(new Set([nuevoDetalle.fecha_cita, ...fechasExtra].filter(Boolean)));
+
+    if (fechasBloque.length === 0) fechasBloque.push(null); // sin fecha capturada, 1 solo renglón
+
+    const basePayload = {
       puesto_id: nuevoDetalle.puesto_id,
       producto_id: nuevoDetalle.producto_id || null,
       id_tipo_personal: nuevoDetalle.id_tipo_personal || null,
       cantidad: Number(nuevoDetalle.cantidad) || 1,
-      turnos: Number(nuevoDetalle.turnos) || 1,
-      fecha_cita: nuevoDetalle.fecha_cita || null,
+      turnos: Number(nuevoDetalle.turnos) >= 0 ? Number(nuevoDetalle.turnos) : 1, // Regla #10: 0 turnos sí se permite
       hora_cita_inicio: nuevoDetalle.hora_cita_inicio || null,
       hora_cita_fin: nuevoDetalle.hora_cita_fin || null,
-      fecha_final_cita: nuevoDetalle.fecha_final_cita || null,
       fecha_liberacion: nuevoDetalle.fecha_liberacion || null,
       presentacion_id: nuevoDetalle.presentacion_id || null,
       fase_evento_id: nuevoDetalle.fase_evento_id || null,
+      uniforme_id: nuevoDetalle.uniforme_id || null,
       lugar_cita_id: nuevoDetalle.lugar_otro ? null : (nuevoDetalle.lugar_cita_id || null),
       lugar_otro: nuevoDetalle.lugar_otro,
       lugar_otro_descripcion: nuevoDetalle.lugar_otro ? (nuevoDetalle.lugar_otro_descripcion || null) : null,
@@ -338,17 +425,64 @@ export default function SitiosAsignacion() {
       completar_productos_similares: nuevoDetalle.completar_productos_similares,
       indicaciones_especiales: nuevoDetalle.indicaciones_especiales || null
     };
+
+    // Regla #4: si no se captura fecha fin, se calcula = duración del turno
+    // (del catálogo de puestos) × número de turnos.
+    const filas = fechasBloque.map(fecha => {
+      // El valor manual de "Fecha final de cita" del formulario solo aplica a
+      // la fecha principal; las fechas extra del bloque siempre se calculan.
+      const esFechaPrincipal = fecha === nuevoDetalle.fecha_cita;
+      const fechaFinalManual = esFechaPrincipal && nuevoDetalle.fecha_final_cita ? new Date(nuevoDetalle.fecha_final_cita).toISOString() : null;
+      const fechaFinal = fechaFinalManual || calcularFechaFinal(fecha, nuevoDetalle.hora_cita_inicio, basePayload.turnos, puestoDetalle?.duracion_turno_horas);
+      return { ...basePayload, fecha_cita: fecha, fecha_final_cita: fechaFinal };
+    });
+
+    // Reglas #8/#9 (validación cliente -- el trigger del servidor es la defensa real).
+    for (const f of filas) {
+      if (f.fecha_final_cita && f.fecha_cita && f.fecha_final_cita.slice(0, 10) < f.fecha_cita) {
+        setMsgDetalle('❌ La fecha final no puede ser anterior a la fecha de cita.'); return;
+      }
+      if (f.fecha_final_cita && f.fecha_cita) {
+        const inicio = new Date(`${f.fecha_cita}T${f.hora_cita_inicio || '00:00'}:00`);
+        if (horasEntre(inicio.toISOString(), f.fecha_final_cita) < 4) {
+          setMsgDetalle('❌ Debe haber mínimo 4 horas entre la fecha/hora de la cita y la fecha final.'); return;
+        }
+      }
+    }
+
+    // Regla #11: las fechas del bloque no deben traslaparse entre sí.
+    if (filas.length > 1) {
+      const intervalos = filas
+        .filter(f => f.fecha_cita)
+        .map(f => ({
+          ini: new Date(`${f.fecha_cita}T${f.hora_cita_inicio || '00:00'}:00`).getTime(),
+          fin: f.fecha_final_cita ? new Date(f.fecha_final_cita).getTime() : new Date(`${f.fecha_cita}T23:59:59`).getTime()
+        }))
+        .sort((a, b) => a.ini - b.ini);
+      for (let i = 1; i < intervalos.length; i++) {
+        if (intervalos[i].ini < intervalos[i - 1].fin) {
+          setMsgDetalle('❌ Las fechas del bloque se traslapan entre sí.'); return;
+        }
+      }
+    }
+
     if (editandoDetalleId) {
-      const { error } = await supabase.from('te_pedidos_detalle').update(payload).eq('id', editandoDetalleId);
+      const { error } = await supabase.from('te_pedidos_detalle').update(filas[0]).eq('id', editandoDetalleId);
       if (error) { setMsgDetalle('❌ ' + error.message); return; }
       await logAccion('sitios_asignacion', 'EDITAR_DETALLE', `pedido ${pedidoSel.folio}: detalle ${editandoDetalleId}`);
     } else {
-      const { error } = await supabase.from('te_pedidos_detalle').insert({ ...payload, tenant_id: DEMO_TENANT_ID, pedido_id: pedidoSel.id });
+      let bloqueNum = null;
+      if (filas.length > 1) {
+        bloqueNum = (detalles.reduce((max, d) => Math.max(max, d.bloque_num || 0), 0)) + 1;
+      }
+      const payloadFinal = filas.map(f => ({ ...f, tenant_id: DEMO_TENANT_ID, pedido_id: pedidoSel.id, bloque_num: bloqueNum }));
+      const { error } = await supabase.from('te_pedidos_detalle').insert(payloadFinal);
       if (error) { setMsgDetalle('❌ ' + error.message); return; }
-      await logAccion('sitios_asignacion', 'INSERT_DETALLE', `pedido ${pedidoSel.folio}: +${payload.cantidad} de producto`);
+      await logAccion('sitios_asignacion', 'INSERT_DETALLE', `pedido ${pedidoSel.folio}: +${payloadFinal.length} renglón(es)${bloqueNum ? ` (bloque ${bloqueNum})` : ''}`);
     }
     setDetalleOpen(false);
     setNuevoDetalle(DETALLE_VACIO);
+    setFechasExtra([]);
     setEditandoDetalleId(null);
     await cargarDetallePedido(pedidoSel);
   };
@@ -373,6 +507,7 @@ export default function SitiosAsignacion() {
       fecha_liberacion: d.fecha_liberacion ? d.fecha_liberacion.slice(0, 10) : '',
       presentacion_id: d.presentacion_id || '',
       fase_evento_id: d.fase_evento_id || '',
+      uniforme_id: d.uniforme_id || '',
       lugar_cita_id: d.lugar_cita_id || '',
       lugar_otro: !!d.lugar_otro,
       lugar_otro_descripcion: d.lugar_otro_descripcion || '',
@@ -381,6 +516,7 @@ export default function SitiosAsignacion() {
       completar_productos_similares: !!d.completar_productos_similares,
       indicaciones_especiales: d.indicaciones_especiales || ''
     });
+    setFechasExtra([]);
     setEditandoDetalleId(pedidoDetalleId);
     setMsgDetalle('');
     setDetalleOpen(true);
@@ -429,6 +565,11 @@ export default function SitiosAsignacion() {
 
   const kpiActivos = pedidos.filter(p => !['cancelado', 'procesado'].includes(p.status)).length;
   const kpiHoy = pedidos.filter(p => p.fecha_evento === new Date().toISOString().slice(0, 10)).length;
+
+  // Regla "Alta de Pedidos" #3: si la sociedad propia es 085-Lobo, Tipo de
+  // movimiento solo permite "Pedido" -- no debe ofrecer "Servicio interno".
+  const esSociedadLobo = !!sociedadesPropias.find(s => s.id === nuevoPedido.id_sociedad_propia)?.titulo?.includes('085-Lobo');
+  const tiposMovimientoDisponibles = tiposMovimiento.filter(t => !esSociedadLobo || t.clave !== 'servicio_interno');
 
   // ============================================================
   // VISTA DETALLE: si hay pedidoSel, muestra la ficha
@@ -529,7 +670,7 @@ export default function SitiosAsignacion() {
                   Matriz de Puestos — fechas como columnas, Bloque + Producto como filas (equivalente a la matriz del sistema Lobo, vía <code>matriz_puestos_pedido()</code>).
                 </span>
                 {pedidoSel.status !== 'cancelado' && (
-                  <button className="btn sm" onClick={() => { setNuevoDetalle({ ...DETALLE_VACIO, lugar_cita_id: pedidoSel?.lugar_cita_id || '' }); setEditandoDetalleId(null); setMsgDetalle(''); setDetalleOpen(true); }}>+ Agregar detalle</button>
+                  <button className="btn sm" onClick={() => { setNuevoDetalle({ ...DETALLE_VACIO, lugar_cita_id: pedidoSel?.lugar_cita_id || '' }); setFechasExtra([]); setEditandoDetalleId(null); setMsgDetalle(''); setDetalleOpen(true); }}>+ Agregar detalle</button>
                 )}
               </div>
               {matrizPivot.grupos.length === 0 ? (
@@ -699,15 +840,16 @@ export default function SitiosAsignacion() {
           <form onSubmit={guardarDetalle} style={{ display: 'grid', gap: 12 }}>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
               <div><label className="label">Tipo de personal</label>
-                <select className="field" value={nuevoDetalle.id_tipo_personal} onChange={e => setNuevoDetalle({ ...nuevoDetalle, id_tipo_personal: e.target.value })}>
+                <select className="field" value={nuevoDetalle.id_tipo_personal} onChange={e => setNuevoDetalle({ ...nuevoDetalle, id_tipo_personal: e.target.value, producto_id: '', puesto_id: '' })}>
                   <option value="">— elegir —</option>
-                  {tiposPersonal.map(t => <option key={t.id} value={t.id}>{t.descripcion || t.clave}</option>)}
+                  {tiposPersonalDisponibles.map(t => <option key={t.id} value={t.id}>{t.descripcion || t.clave}</option>)}
                 </select>
+                {!pedidoSel?.tipo_complejidad_id && <p style={{ fontSize: 11, color: 'var(--muted)', marginTop: 4 }}>"Staff" solo aparece si el pedido tiene complejidad.</p>}
               </div>
               <div><label className="label">Producto *</label>
                 <select required className="field" value={nuevoDetalle.producto_id} onChange={e => onProductoChange(e.target.value)}>
                   <option value="">— elegir —</option>
-                  {productos.map(p => <option key={p.id} value={p.id}>{p.titulo}{p.subcategoria ? ` - ${p.subcategoria}` : ''}</option>)}
+                  {productosFiltrados.map(p => <option key={p.id} value={p.id}>{p.titulo}{p.subcategoria ? ` - ${p.subcategoria}` : ''}</option>)}
                 </select>
               </div>
             </div>
@@ -722,19 +864,37 @@ export default function SitiosAsignacion() {
                 <input required type="number" min="1" className="field" value={nuevoDetalle.cantidad} onChange={e => setNuevoDetalle({ ...nuevoDetalle, cantidad: e.target.value })} />
               </div>
               <div><label className="label">Turnos *</label>
-                <input required type="number" min="0.5" step="0.5" className="field" value={nuevoDetalle.turnos} onChange={e => setNuevoDetalle({ ...nuevoDetalle, turnos: e.target.value })} />
+                <input required type="number" min="0" step="0.5" className="field" value={nuevoDetalle.turnos} onChange={e => setNuevoDetalle({ ...nuevoDetalle, turnos: e.target.value })} />
+                <p style={{ fontSize: 11, color: 'var(--muted)', marginTop: 4 }}>Se permite capturar 0 turnos.</p>
               </div>
             </div>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 12 }}>
-              <div><label className="label">Fecha de cita</label>
-                <input type="date" className="field" value={nuevoDetalle.fecha_cita} onChange={e => setNuevoDetalle({ ...nuevoDetalle, fecha_cita: e.target.value })} />
-              </div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
               <div><label className="label">Hora inicio</label>
                 <input type="time" className="field" value={nuevoDetalle.hora_cita_inicio} onChange={e => setNuevoDetalle({ ...nuevoDetalle, hora_cita_inicio: e.target.value })} />
               </div>
               <div><label className="label">Hora fin</label>
                 <input type="time" className="field" value={nuevoDetalle.hora_cita_fin} onChange={e => setNuevoDetalle({ ...nuevoDetalle, hora_cita_fin: e.target.value })} />
               </div>
+            </div>
+            <div>
+              <label className="label">Fecha{!editandoDetalleId ? '(s) de cita — Bloque' : ' de cita'}</label>
+              <div style={{ display: 'grid', gap: 6 }}>
+                <input type="date" className="field" value={nuevoDetalle.fecha_cita} onChange={e => setNuevoDetalle({ ...nuevoDetalle, fecha_cita: e.target.value })} />
+                {!editandoDetalleId && fechasExtra.map((f, i) => (
+                  <div key={i} style={{ display: 'flex', gap: 8 }}>
+                    <input type="date" className="field" value={f} onChange={e => setFechasExtra(prev => prev.map((x, j) => j === i ? e.target.value : x))} />
+                    <button type="button" className="btn ghost sm" onClick={() => setFechasExtra(prev => prev.filter((_, j) => j !== i))}>✕</button>
+                  </div>
+                ))}
+                {!editandoDetalleId && (
+                  <button type="button" className="btn ghost sm" style={{ justifySelf: 'start' }} onClick={() => setFechasExtra(prev => [...prev, ''])}>+ Agregar fecha al bloque</button>
+                )}
+              </div>
+              {!editandoDetalleId && fechasExtra.length > 0 && (
+                <p style={{ fontSize: 11, color: 'var(--muted)', marginTop: 4 }}>
+                  Se crearán {1 + fechasExtra.filter(Boolean).length} renglones con la misma cantidad/turnos/liberación/similares, agrupados en un mismo bloque.
+                </p>
+              )}
             </div>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
               <div><label className="label">Fecha final de cita</label>
@@ -747,7 +907,7 @@ export default function SitiosAsignacion() {
               </div>
             </div>
             <div>
-              <label className="label">Lugar de cita</label>
+              <label className="label">Lugar de cita *</label>
               <div style={{ display: 'flex', gap: 16, marginBottom: 6 }}>
                 <label style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                   <input type="radio" name="lugarCitaModo" checked={!nuevoDetalle.lugar_otro} onChange={() => setNuevoDetalle({ ...nuevoDetalle, lugar_otro: false })} />
@@ -777,9 +937,15 @@ export default function SitiosAsignacion() {
               <div><label className="label">Fase del evento</label>
                 <select className="field" value={nuevoDetalle.fase_evento_id} onChange={e => setNuevoDetalle({ ...nuevoDetalle, fase_evento_id: e.target.value })}>
                   <option value="">— sin fase —</option>
-                  {fasesEvento.map(f => <option key={f.id} value={f.id}>{f.titulo}</option>)}
+                  {fasesDisponibles.map(f => <option key={f.id} value={f.id}>{f.titulo}</option>)}
                 </select>
               </div>
+            </div>
+            <div><label className="label">Uniforme</label>
+              <select className="field" value={nuevoDetalle.uniforme_id} onChange={e => setNuevoDetalle({ ...nuevoDetalle, uniforme_id: e.target.value })}>
+                <option value="">— sin uniforme —</option>
+                {uniformesFiltrados.map(u => <option key={u.id} value={u.id}>{u.titulo}</option>)}
+              </select>
             </div>
             <div style={{ display: 'flex', gap: 20, flexWrap: 'wrap' }}>
               <label style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
@@ -939,7 +1105,10 @@ export default function SitiosAsignacion() {
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr auto', gap: 12, alignItems: 'end' }}>
             <div><label className="label">Evento</label>
               <select className="field" value={nuevoPedido.evento_id} disabled={!nuevoPedido.cliente_id}
-                onChange={e => setNuevoPedido({ ...nuevoPedido, evento_id: e.target.value })}>
+                onChange={e => {
+                  const ev = eventos.find(x => x.id === e.target.value);
+                  setNuevoPedido(prev => ({ ...prev, evento_id: e.target.value, titulo: ev ? ev.titulo : prev.titulo }));
+                }}>
                 <option value="">{nuevoPedido.cliente_id ? '— elegir —' : 'elegí cliente primero'}</option>
                 {eventos.map(ev => <option key={ev.id} value={ev.id}>{ev.titulo}</option>)}
               </select>
@@ -992,8 +1161,9 @@ export default function SitiosAsignacion() {
             <div><label className="label">Tipo de movimiento *</label>
               <select required className="field" value={nuevoPedido.tipo_movimiento_id} onChange={e => setNuevoPedido({ ...nuevoPedido, tipo_movimiento_id: e.target.value })}>
                 <option value="">— elegir —</option>
-                {tiposMovimiento.map(t => <option key={t.id} value={t.id}>{t.titulo}{t.se_factura ? ' (se factura)' : ''}</option>)}
+                {tiposMovimientoDisponibles.map(t => <option key={t.id} value={t.id}>{t.titulo}{t.se_factura ? ' (se factura)' : ''}</option>)}
               </select>
+              {esSociedadLobo && <p style={{ fontSize: 11, color: 'var(--muted)', marginTop: 4 }}>Sociedad 085-Lobo: no se ofrece "Servicio interno".</p>}
             </div>
             <div><label className="label">Sociedad propia</label>
               <select className="field" value={nuevoPedido.id_sociedad_propia} onChange={e => setNuevoPedido({ ...nuevoPedido, id_sociedad_propia: e.target.value })}>
