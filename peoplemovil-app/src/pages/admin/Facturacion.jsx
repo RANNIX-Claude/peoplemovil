@@ -4,6 +4,7 @@ import TablaWrap from '../../components/ui/TablaWrap.jsx';
 import Badge from '../../components/ui/Badge.jsx';
 import KpiCard from '../../components/ui/KpiCard.jsx';
 import Modal from '../../components/ui/Modal.jsx';
+import { tituloConLinea } from '../../components/ui/CardHeader.jsx';
 import { useModuleAudit } from '../../lib/audit.js';
 
 const fmt = n => '$' + Number(n || 0).toLocaleString('es-MX', { minimumFractionDigits: 2 });
@@ -98,7 +99,7 @@ export default function Facturacion() {
               <div><div className="label">Total</div><div style={{ fontWeight: 800 }}>{fmt(sel.total)}</div></div>
             </div>
             <div>
-              <h3>Partidas ({partidas.length})</h3>
+              <h3 style={tituloConLinea}>🧾 Partidas ({partidas.length})</h3>
               {partidas.map(p => (
                 <div key={p.id} style={{ padding: 8, background: 'var(--surface)', borderRadius: 6, marginBottom: 4, fontSize: 12 }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between' }}>
@@ -109,7 +110,7 @@ export default function Facturacion() {
               ))}
             </div>
             <div>
-              <h3>Pagos ({pagos.length})</h3>
+              <h3 style={tituloConLinea}>💳 Pagos ({pagos.length})</h3>
               {pagos.length === 0 && <p style={{ fontSize: 12, color: 'var(--muted)' }}>Sin pagos registrados aún.</p>}
               {pagos.map(p => (
                 <div key={p.id} style={{ padding: 8, background: 'var(--surface)', borderRadius: 6, marginBottom: 4, fontSize: 12 }}>

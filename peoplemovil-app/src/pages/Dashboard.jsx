@@ -4,6 +4,7 @@ import KpiCard from '../components/ui/KpiCard.jsx';
 import Modal from '../components/ui/Modal.jsx';
 import TablaWrap from '../components/ui/TablaWrap.jsx';
 import Badge from '../components/ui/Badge.jsx';
+import { tituloConLinea } from '../components/ui/CardHeader.jsx';
 import { supabase, supabaseReady, DEMO_TENANT_ID } from '../lib/supabase.js';
 import { useModuleAudit } from '../lib/audit.js';
 
@@ -61,7 +62,7 @@ export default function Dashboard() {
       <div className="card-grid">
         <div className="card" style={{ margin: 0 }}>
           <div className="section-eyebrow">Cobertura por sitio</div>
-          <h3 style={{ marginTop: 6 }}>Semáforo (verde &gt;80% · ámbar 60-80% · rojo &lt;60%)</h3>
+          <h3 style={{ ...tituloConLinea, marginTop: 6 }}>🚦 Semáforo (verde &gt;80% · ámbar 60-80% · rojo &lt;60%)</h3>
           {coberturas.length === 0
             ? <p style={{ fontSize: 12, color: 'var(--muted)' }}>Sin pedidos activos aún — cuando los haya se listan aquí.</p>
             : <ul style={{ listStyle: 'none', display: 'flex', flexDirection: 'column', gap: 10 }}>
@@ -79,7 +80,7 @@ export default function Dashboard() {
 
         <div className="card" style={{ margin: 0 }}>
           <div className="section-eyebrow">Precauciones fiscales</div>
-          <h3 style={{ marginTop: 6 }}>Antes de cerrar nómina</h3>
+          <h3 style={{ ...tituloConLinea, marginTop: 6 }}>⚠️ Antes de cerrar nómina</h3>
           {precauciones.length === 0
             ? <p style={{ fontSize: 12, color: 'var(--muted)' }}>Sin precauciones. Todo el personal tiene datos fiscales completos.</p>
             : <ul style={{ listStyle: 'none', fontSize: 12 }}>

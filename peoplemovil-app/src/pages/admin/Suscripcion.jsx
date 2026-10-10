@@ -3,6 +3,7 @@ import { supabase, supabaseReady, DEMO_TENANT_ID } from '../../lib/supabase.js';
 import { PLANES } from '../../lib/plan.js';
 import KpiCard from '../../components/ui/KpiCard.jsx';
 import Badge from '../../components/ui/Badge.jsx';
+import { tituloConLinea } from '../../components/ui/CardHeader.jsx';
 import { useModuleAudit } from '../../lib/audit.js';
 
 const fmt$ = n => '$' + Number(n || 0).toLocaleString('es-MX', { minimumFractionDigits: 2 });
@@ -65,7 +66,7 @@ export default function Suscripcion() {
       </div>
 
       <div className="card">
-        <h3>Detalle de tu plan {codigoPlan}</h3>
+        <h3 style={tituloConLinea}>💎 Detalle de tu plan {codigoPlan}</h3>
         {susc && (
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, fontSize: 13, marginBottom: 16 }}>
             <div><div className="label">Estado</div><Badge estado="activo">ACTIVA</Badge></div>

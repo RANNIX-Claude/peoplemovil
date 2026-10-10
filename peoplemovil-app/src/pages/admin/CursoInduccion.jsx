@@ -4,6 +4,7 @@ import TablaWrap from '../../components/ui/TablaWrap.jsx';
 import KpiCard from '../../components/ui/KpiCard.jsx';
 import Badge from '../../components/ui/Badge.jsx';
 import Modal from '../../components/ui/Modal.jsx';
+import { tituloConLinea } from '../../components/ui/CardHeader.jsx';
 import { useModuleAudit, logAccion } from '../../lib/audit.js';
 
 // Reclutamiento, pasos 8-9-10 del flujo (ver NOTIFICACIONES_RECLUTAMIENTO.md):
@@ -145,7 +146,7 @@ export default function CursoInduccion() {
 
           {resultados && (
             <div className="card" style={{ padding: 14, marginTop: 14 }}>
-              <h3 style={{ marginTop: 0 }}>Avisar a RH (correo con PDF de altas)</h3>
+              <h3 style={tituloConLinea}>📧 Avisar a RH (correo con PDF de altas)</h3>
               <div style={{ display: 'flex', gap: 10, alignItems: 'end', flexWrap: 'wrap' }}>
                 <div style={{ flex: 1, minWidth: 220 }}>
                   <label className="label">Correo de RH destino</label>

@@ -6,6 +6,7 @@ import Badge from '../components/ui/Badge.jsx';
 import Chip from '../components/ui/Chip.jsx';
 import KpiCard from '../components/ui/KpiCard.jsx';
 import Semaforo from '../components/Semaforo.jsx';
+import { tituloConLinea } from '../components/ui/CardHeader.jsx';
 import { supabase, supabaseReady, DEMO_TENANT_ID } from '../lib/supabase.js';
 import { useModuleAudit, logAccion } from '../lib/audit.js';
 
@@ -499,7 +500,7 @@ export default function SitiosAsignacion() {
             </div>
 
             <div className="card">
-              <h3>Datos del pedido</h3>
+              <h3 style={tituloConLinea}>📦 Datos del pedido</h3>
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14, fontSize: 13 }}>
                 <div><div className="label">Cliente</div><div>{nombreCliente || '—'}</div></div>
                 <div><div className="label">Contacto</div><div>{pedidoSel.contacto_nombre || '—'} {pedidoSel.contacto_telefono ? `· ${pedidoSel.contacto_telefono}` : ''}</div></div>

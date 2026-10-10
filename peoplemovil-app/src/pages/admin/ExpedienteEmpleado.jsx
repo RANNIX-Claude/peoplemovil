@@ -5,6 +5,8 @@ import TablaWrap from '../../components/ui/TablaWrap.jsx';
 import Badge from '../../components/ui/Badge.jsx';
 import KpiCard from '../../components/ui/KpiCard.jsx';
 import AnilloPorcentaje from '../../components/ui/AnilloPorcentaje.jsx';
+import CardHeader, { tituloConLinea } from '../../components/ui/CardHeader.jsx';
+import Campo, { gridAuto } from '../../components/ui/Campo.jsx';
 import Semaforo from '../../components/Semaforo.jsx';
 import { supabase, supabaseReady, DEMO_TENANT_ID } from '../../lib/supabase.js';
 import { useModuleAudit, logAccion } from '../../lib/audit.js';
@@ -106,20 +108,6 @@ function construirAniosLaborales(fechaAlta, periodos) {
   return anios.reverse();
 }
 
-// Campo de solo-lectura en "renglón": línea divisoria debajo para que el
-// grid se lea como filas (como el RH de referencia), no como huecos sueltos.
-// Etiqueta chica/gris vs. valor más grande/oscuro -- contraste deliberado.
-function Campo({ label, valor }) {
-  return (
-    <div style={{ borderBottom: '1px solid var(--border)', paddingBottom: 10 }}>
-      <div className="label">{label}</div>
-      <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--text)' }}>
-        {valor || <span style={{ color: 'var(--muted)', fontWeight: 400 }}>—</span>}
-      </div>
-    </div>
-  );
-}
-
 // Resuelve un path del bucket privado (o una URL pública de datos demo) a un
 // link con el que el navegador pueda abrir el archivo.
 function ArchivoLink({ path, label = 'Ver ↗' }) {
@@ -134,21 +122,7 @@ function ArchivoLink({ path, label = 'Ver ↗' }) {
   return <a href={url} target="_blank" rel="noreferrer" style={{ fontSize: 12 }}>{label}</a>;
 }
 
-const gridAuto = { display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(170px, 1fr))', gap: 16 };
-const tituloConLinea = { marginTop: 0, marginBottom: 12, paddingBottom: 10, borderBottom: '1px solid var(--border)' };
 const CAP_TIPOS = { interna: 'activo', externa: 'pendiente', certificacion: 'proceso' };
-
-// Encabezado de card con ícono + botón "Editar" opcional (gateado por permiso
-// desde el padre) -- mismo criterio visual que el módulo RH de referencia
-// (IRPAPP): cada card se identifica de un vistazo por su ícono.
-function CardHeader({ titulo, icono, onEditar }) {
-  return (
-    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12, paddingBottom: 10, borderBottom: '1px solid var(--border)' }}>
-      <h3 style={{ margin: 0, display: 'flex', alignItems: 'center', gap: 8 }}>{icono && <span aria-hidden="true">{icono}</span>}{titulo}</h3>
-      {onEditar && <button className="btn ghost sm" onClick={onEditar}>✎ Editar</button>}
-    </div>
-  );
-}
 
 // Modal de edición genérico: recibe la definición de una "sección" (título +
 // lista de campos) y los valores actuales del empleado, y delega el guardado

@@ -6500,3 +6500,719 @@ BEGIN
 END $$ LANGUAGE plpgsql SECURITY DEFINER;
 
 -- ============================================================================
+-- Migración 030 -- Data Warehouse real (dimensiones + hechos + ETL + cron)
+-- ============================================================================
+-- DataWarehouse.jsx (construido por otra sesión en paralelo) ya mostraba una
+-- pantalla completa -- 6 vistas, botón "Refrescar DW", card "Dimensiones (9)
+-- + Hechos (5) + Vistas (6)" -- pero consultaba `supabase.schema('dw')` y ESE
+-- SCHEMA NO EXISTE: ni siquiera el SQL estaba escrito en reset_database.sql
+-- (confirmado por grep, cero resultados para "dim_tiempo_dia"/"hecho_" antes
+-- de esta migración). Era pantalla sin backend, "Invalid schema: dw" al abrir.
+--
+-- Decisión de diseño (D15): NO se usa un schema Postgres separado `dw` como
+-- el frontend original asumía. PostgREST solo expone los schemas listados en
+-- Settings -> API -> Exposed schemas del dashboard de Supabase, algo que esta
+-- sesión no tiene forma de cambiar (no hay tool para esa configuración, es
+-- fuera de SQL) -- usar `dw.*` real habría dejado el Data Warehouse
+-- construido pero inaccesible otra vez. Se usa `public` con prefijo `dw_`,
+-- exactamente el mismo patrón que el resto del esquema (te_/tc_/tp_/tr_/tl_,
+-- ya expuesto y funcionando). El frontend se actualiza para quitar `.schema('dw')`.
+--
+-- Pedido explícito del usuario (2026-10-10): modelo estrella real, con
+-- dimensión de tiempo (día/semana/mes/trimestre/año) y dimensión geográfica,
+-- tablas de hecho con métricas identificadas, cortes semanales/mensuales/
+-- trimestrales/anuales, y carga periódica (diaria) -- no solo manual.
+--
+-- Aplicada a la base real vía apply_migration (030/030b/030c/030d).
+-- ============================================================================
+
+CREATE TABLE IF NOT EXISTS dw_dim_tiempo_dia (
+  fecha               date PRIMARY KEY,
+  anio                int NOT NULL,
+  trimestre           int NOT NULL,
+  mes                 int NOT NULL,
+  mes_nombre          text NOT NULL,
+  dia_mes             int NOT NULL,
+  dia_anio            int NOT NULL,
+  anio_iso            int NOT NULL,
+  semana_iso          int NOT NULL,
+  dia_semana          int NOT NULL,
+  dia_semana_nombre   text NOT NULL,
+  es_fin_semana       boolean NOT NULL,
+  etiqueta_semana     text NOT NULL,
+  etiqueta_mes        text NOT NULL,
+  etiqueta_trimestre  text NOT NULL,
+  fecha_inicio_semana date NOT NULL,
+  fecha_inicio_mes    date NOT NULL,
+  fecha_inicio_trimestre date NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS dw_dim_tiempo_semana (
+  fecha_inicio  date PRIMARY KEY,
+  fecha_fin     date NOT NULL,
+  anio_iso      int NOT NULL,
+  semana_iso    int NOT NULL,
+  etiqueta      text NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS dw_dim_tiempo_mes (
+  fecha_inicio  date PRIMARY KEY,
+  anio          int NOT NULL,
+  mes           int NOT NULL,
+  mes_nombre    text NOT NULL,
+  trimestre     int NOT NULL,
+  etiqueta      text NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS dw_dim_tiempo_trimestre (
+  fecha_inicio  date PRIMARY KEY,
+  anio          int NOT NULL,
+  trimestre     int NOT NULL,
+  etiqueta      text NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS dw_dim_tiempo_anio (
+  anio  int PRIMARY KEY
+);
+
+INSERT INTO dw_dim_tiempo_dia
+SELECT
+  d::date,
+  EXTRACT(year FROM d)::int,
+  EXTRACT(quarter FROM d)::int,
+  EXTRACT(month FROM d)::int,
+  to_char(d, 'TMMonth'),
+  EXTRACT(day FROM d)::int,
+  EXTRACT(doy FROM d)::int,
+  EXTRACT(isoyear FROM d)::int,
+  EXTRACT(week FROM d)::int,
+  EXTRACT(isodow FROM d)::int,
+  to_char(d, 'TMDay'),
+  EXTRACT(isodow FROM d) IN (6,7),
+  EXTRACT(isoyear FROM d) || '-W' || lpad(EXTRACT(week FROM d)::text, 2, '0'),
+  to_char(d, 'YYYY-MM'),
+  EXTRACT(year FROM d) || '-Q' || EXTRACT(quarter FROM d),
+  (d::date - (EXTRACT(isodow FROM d)::int - 1)),
+  date_trunc('month', d)::date,
+  date_trunc('quarter', d)::date
+FROM generate_series('2020-01-01'::date, '2030-12-31'::date, '1 day'::interval) d
+ON CONFLICT (fecha) DO NOTHING;
+
+INSERT INTO dw_dim_tiempo_semana
+SELECT DISTINCT fecha_inicio_semana, fecha_inicio_semana + 6, anio_iso, semana_iso, etiqueta_semana
+FROM dw_dim_tiempo_dia
+ON CONFLICT (fecha_inicio) DO NOTHING;
+
+INSERT INTO dw_dim_tiempo_mes
+SELECT DISTINCT fecha_inicio_mes, anio, mes, mes_nombre, trimestre, etiqueta_mes
+FROM dw_dim_tiempo_dia
+ON CONFLICT (fecha_inicio) DO NOTHING;
+
+INSERT INTO dw_dim_tiempo_trimestre
+SELECT DISTINCT fecha_inicio_trimestre, anio, trimestre, etiqueta_trimestre
+FROM dw_dim_tiempo_dia
+ON CONFLICT (fecha_inicio) DO NOTHING;
+
+INSERT INTO dw_dim_tiempo_anio
+SELECT DISTINCT anio FROM dw_dim_tiempo_dia
+ON CONFLICT (anio) DO NOTHING;
+
+CREATE TABLE IF NOT EXISTS dw_dim_geografia (
+  id            uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  tenant_id     uuid NOT NULL REFERENCES te_tenants(id) ON DELETE CASCADE,
+  estado_id     uuid REFERENCES tc_estados_mx(id),
+  estado_nombre text NOT NULL,
+  region        text,
+  UNIQUE (tenant_id, estado_id)
+);
+
+CREATE TABLE IF NOT EXISTS dw_dim_tenant (
+  id uuid PRIMARY KEY REFERENCES te_tenants(id) ON DELETE CASCADE,
+  razon_social text NOT NULL,
+  vertical     text
+);
+
+CREATE TABLE IF NOT EXISTS dw_dim_empleado (
+  id                uuid PRIMARY KEY REFERENCES te_empleados(id) ON DELETE CASCADE,
+  tenant_id         uuid NOT NULL REFERENCES te_tenants(id) ON DELETE CASCADE,
+  folio             int NOT NULL,
+  nombre_completo   text NOT NULL,
+  regimen_pago      regimen_pago_enum,
+  tipo_empleado     text,
+  activo            boolean NOT NULL,
+  puesto_principal_id uuid REFERENCES tc_puestos(id)
+);
+
+CREATE TABLE IF NOT EXISTS dw_dim_puesto (
+  id              uuid PRIMARY KEY REFERENCES tc_puestos(id) ON DELETE CASCADE,
+  tenant_id       uuid NOT NULL REFERENCES te_tenants(id) ON DELETE CASCADE,
+  titulo          text NOT NULL,
+  unidad_negocio  text,
+  pago_default    numeric(12,2),
+  regimen_pago    regimen_pago_enum
+);
+
+CREATE TABLE IF NOT EXISTS dw_dim_sitio (
+  id            uuid PRIMARY KEY REFERENCES tc_sitios(id) ON DELETE CASCADE,
+  tenant_id     uuid NOT NULL REFERENCES te_tenants(id) ON DELETE CASCADE,
+  titulo        text NOT NULL,
+  tipo_sitio    tipo_sitio_enum,
+  geografia_id  uuid REFERENCES dw_dim_geografia(id),
+  latitud       numeric(9,6),
+  longitud      numeric(9,6),
+  codigo_postal text
+);
+
+CREATE TABLE IF NOT EXISTS dw_dim_cliente (
+  id           uuid PRIMARY KEY REFERENCES tc_clientes(id) ON DELETE CASCADE,
+  tenant_id    uuid NOT NULL REFERENCES te_tenants(id) ON DELETE CASCADE,
+  razon_social text NOT NULL,
+  rfc          text
+);
+
+CREATE TABLE IF NOT EXISTS dw_hecho_asistencia_diaria (
+  id                       uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  tenant_id                uuid NOT NULL REFERENCES te_tenants(id) ON DELETE CASCADE,
+  fecha                    date NOT NULL REFERENCES dw_dim_tiempo_dia(fecha),
+  empleado_id              uuid NOT NULL REFERENCES dw_dim_empleado(id),
+  puesto_id                uuid REFERENCES dw_dim_puesto(id),
+  sitio_id                 uuid REFERENCES dw_dim_sitio(id),
+  turnos_programados       int NOT NULL DEFAULT 0,
+  turnos_asistidos         int NOT NULL DEFAULT 0,
+  turnos_falta             int NOT NULL DEFAULT 0,
+  turnos_retardo           int NOT NULL DEFAULT 0,
+  horas_trabajadas         numeric(8,2) NOT NULL DEFAULT 0,
+  pct_puntualidad_promedio numeric(5,2),
+  penalizacion_dias        numeric(8,3) NOT NULL DEFAULT 0,
+  penalizacion_sueldo      numeric(12,2) NOT NULL DEFAULT 0,
+  UNIQUE (tenant_id, empleado_id, fecha)
+);
+CREATE INDEX IF NOT EXISTS ix_dwhad_tf ON dw_hecho_asistencia_diaria(tenant_id, fecha);
+
+CREATE TABLE IF NOT EXISTS dw_hecho_cobertura_sitio_dia (
+  id                   uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  tenant_id            uuid NOT NULL REFERENCES te_tenants(id) ON DELETE CASCADE,
+  fecha                date NOT NULL REFERENCES dw_dim_tiempo_dia(fecha),
+  sitio_id             uuid NOT NULL REFERENCES dw_dim_sitio(id),
+  puestos_requeridos   int NOT NULL DEFAULT 0,
+  puestos_cubiertos    int NOT NULL DEFAULT 0,
+  puestos_confirmados  int NOT NULL DEFAULT 0,
+  puestos_preasignados int NOT NULL DEFAULT 0,
+  pct_cobertura        numeric(5,2),
+  UNIQUE (tenant_id, sitio_id, fecha)
+);
+CREATE INDEX IF NOT EXISTS ix_dwhcsd_tf ON dw_hecho_cobertura_sitio_dia(tenant_id, fecha);
+
+CREATE TABLE IF NOT EXISTS dw_hecho_reservaciones (
+  id                     uuid PRIMARY KEY,
+  tenant_id              uuid NOT NULL REFERENCES te_tenants(id) ON DELETE CASCADE,
+  fecha                  date NOT NULL REFERENCES dw_dim_tiempo_dia(fecha),
+  empleado_id            uuid REFERENCES dw_dim_empleado(id),
+  puesto_id              uuid REFERENCES dw_dim_puesto(id),
+  sitio_id               uuid REFERENCES dw_dim_sitio(id),
+  estado                 estado_reservacion_enum NOT NULL,
+  estado_asistencia      estado_asistencia_enum,
+  duracion_en_turnos     numeric(4,2) NOT NULL DEFAULT 1,
+  costo_unit             numeric(12,2),
+  porcentaje_puntualidad numeric(4,3),
+  penalizacion_dias      numeric(6,3) NOT NULL DEFAULT 0,
+  penalizacion_sueldo    numeric(12,2) NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS ix_dwhr_tf ON dw_hecho_reservaciones(tenant_id, fecha);
+CREATE INDEX IF NOT EXISTS ix_dwhr_puesto ON dw_hecho_reservaciones(tenant_id, puesto_id, fecha);
+
+CREATE TABLE IF NOT EXISTS dw_hecho_pagos_dispersados (
+  id                uuid PRIMARY KEY,
+  tenant_id         uuid NOT NULL REFERENCES te_tenants(id) ON DELETE CASCADE,
+  fecha             date NOT NULL REFERENCES dw_dim_tiempo_dia(fecha),
+  empleado_id       uuid REFERENCES dw_dim_empleado(id),
+  monto             numeric(14,2) NOT NULL,
+  monto_bruto       numeric(14,2),
+  monto_neto        numeric(14,2),
+  penalizaciones    numeric(14,2),
+  regimen_pago      regimen_pago_enum,
+  status            estatus_pago_enum NOT NULL
+);
+CREATE INDEX IF NOT EXISTS ix_dwhpd_tf ON dw_hecho_pagos_dispersados(tenant_id, fecha);
+
+CREATE TABLE IF NOT EXISTS dw_hecho_facturas_cliente (
+  id        uuid PRIMARY KEY,
+  tenant_id uuid NOT NULL REFERENCES te_tenants(id) ON DELETE CASCADE,
+  fecha     date NOT NULL REFERENCES dw_dim_tiempo_dia(fecha),
+  cliente_id uuid REFERENCES dw_dim_cliente(id),
+  subtotal  numeric(14,2) NOT NULL DEFAULT 0,
+  iva       numeric(14,2) NOT NULL DEFAULT 0,
+  total     numeric(14,2) NOT NULL DEFAULT 0,
+  status    text NOT NULL
+);
+CREATE INDEX IF NOT EXISTS ix_dwhfc_tf ON dw_hecho_facturas_cliente(tenant_id, fecha);
+
+DO $$
+DECLARE t text;
+BEGIN
+  FOREACH t IN ARRAY ARRAY[
+    'dw_dim_geografia','dw_dim_empleado','dw_dim_puesto','dw_dim_sitio','dw_dim_cliente',
+    'dw_hecho_asistencia_diaria','dw_hecho_cobertura_sitio_dia','dw_hecho_reservaciones',
+    'dw_hecho_pagos_dispersados','dw_hecho_facturas_cliente'
+  ] LOOP
+    EXECUTE format('ALTER TABLE %I ENABLE ROW LEVEL SECURITY', t);
+    EXECUTE format('DROP POLICY IF EXISTS p_%1$s_sel ON %1$s', t);
+    EXECUTE format('CREATE POLICY p_%1$s_sel ON %1$s FOR SELECT USING (tenant_id = current_tenant_id())', t);
+  END LOOP;
+END $$;
+
+ALTER TABLE dw_dim_tenant ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS p_dw_dim_tenant_sel ON dw_dim_tenant;
+CREATE POLICY p_dw_dim_tenant_sel ON dw_dim_tenant FOR SELECT USING (id = current_tenant_id());
+
+GRANT ALL ON
+  dw_dim_tiempo_dia, dw_dim_tiempo_semana, dw_dim_tiempo_mes, dw_dim_tiempo_trimestre, dw_dim_tiempo_anio,
+  dw_dim_geografia, dw_dim_tenant, dw_dim_empleado, dw_dim_puesto, dw_dim_sitio, dw_dim_cliente,
+  dw_hecho_asistencia_diaria, dw_hecho_cobertura_sitio_dia, dw_hecho_reservaciones,
+  dw_hecho_pagos_dispersados, dw_hecho_facturas_cliente
+TO anon, authenticated, service_role;
+
+-- ---------------------------------------------------------------------------
+-- Backfill real: ningún tc_sitios.id_estado estaba poblado (0 de 40) y
+-- tc_estados_mx solo tenía los 6 estados reales sembrados para el tenant
+-- "eventos" -- los 3 tenants demo multi-vertical (construcción/seguridad/btl,
+-- Migración 017) nunca recibieron el catálogo de estados. Se completa ambos
+-- gaps inferidos de la dirección real de cada sitio (ya existente, no se
+-- inventa texto) -- 3 sitios quedan sin estado a propósito (dirección NULL o
+-- "Vacante": Allegro Restaurante Bar, Varios, Parque Mexico).
+-- ---------------------------------------------------------------------------
+INSERT INTO tc_estados_mx (tenant_id, clave_ine, nombre)
+SELECT t.id, e.clave_ine, e.nombre
+FROM te_tenants t
+CROSS JOIN (SELECT DISTINCT clave_ine, nombre FROM tc_estados_mx WHERE tenant_id = '00000000-0000-0000-0000-000000000001') e
+WHERE t.id <> '00000000-0000-0000-0000-000000000001'
+ON CONFLICT (tenant_id, nombre) DO NOTHING;
+
+UPDATE tc_sitios s
+SET id_estado = (
+  SELECT e.id FROM tc_estados_mx e
+  WHERE e.tenant_id = s.tenant_id
+    AND e.nombre = CASE
+      WHEN s.direccion ILIKE '%Nuevo Le%' OR s.direccion ILIKE '%Monterrey%' THEN 'Nuevo León'
+      WHEN s.direccion ILIKE '%Quer%taro%' THEN 'Querétaro'
+      WHEN s.direccion ILIKE '%Jalisco%' OR s.direccion ILIKE '%Zapopan%' OR s.direccion ILIKE '%Guadalajara%' THEN 'Jalisco'
+      WHEN s.direccion ILIKE '%Puebla%' THEN 'Puebla'
+      WHEN s.direccion ILIKE '%Edo. de M%xico%' OR s.direccion ILIKE '%Naucalpan%' OR s.direccion ILIKE '%Cuautitl%n%' OR s.direccion ILIKE '%Sat%lite%' OR s.direccion ILIKE '%Toluca%' THEN 'Estado de México'
+      WHEN s.direccion IS NOT NULL AND s.direccion <> 'Vacante' THEN 'Ciudad de México'
+      ELSE NULL
+    END
+)
+WHERE s.id_estado IS NULL;
+
+-- ---------------------------------------------------------------------------
+-- Región por estado -- agrupación estándar de México (INEGI-like).
+-- ---------------------------------------------------------------------------
+CREATE OR REPLACE FUNCTION dw_region_de_estado(p_estado text) RETURNS text AS $$
+  SELECT CASE p_estado
+    WHEN 'Baja California' THEN 'Noroeste'
+    WHEN 'Baja California Sur' THEN 'Noroeste'
+    WHEN 'Sonora' THEN 'Noroeste'
+    WHEN 'Sinaloa' THEN 'Noroeste'
+    WHEN 'Chihuahua' THEN 'Norte'
+    WHEN 'Coahuila' THEN 'Norte'
+    WHEN 'Nuevo León' THEN 'Noreste'
+    WHEN 'Tamaulipas' THEN 'Noreste'
+    WHEN 'Durango' THEN 'Norte'
+    WHEN 'Zacatecas' THEN 'Norte'
+    WHEN 'San Luis Potosí' THEN 'Centro-Norte'
+    WHEN 'Aguascalientes' THEN 'Bajío'
+    WHEN 'Guanajuato' THEN 'Bajío'
+    WHEN 'Querétaro' THEN 'Bajío'
+    WHEN 'Jalisco' THEN 'Occidente'
+    WHEN 'Colima' THEN 'Occidente'
+    WHEN 'Nayarit' THEN 'Occidente'
+    WHEN 'Michoacán' THEN 'Occidente'
+    WHEN 'Ciudad de México' THEN 'Centro'
+    WHEN 'Estado de México' THEN 'Centro'
+    WHEN 'Hidalgo' THEN 'Centro'
+    WHEN 'Morelos' THEN 'Centro'
+    WHEN 'Tlaxcala' THEN 'Centro'
+    WHEN 'Puebla' THEN 'Centro'
+    WHEN 'Guerrero' THEN 'Sur'
+    WHEN 'Oaxaca' THEN 'Sur'
+    WHEN 'Chiapas' THEN 'Sur'
+    WHEN 'Veracruz' THEN 'Golfo'
+    WHEN 'Tabasco' THEN 'Sureste'
+    WHEN 'Campeche' THEN 'Sureste'
+    WHEN 'Yucatán' THEN 'Sureste'
+    WHEN 'Quintana Roo' THEN 'Sureste'
+    ELSE NULL
+  END;
+$$ LANGUAGE sql IMMUTABLE;
+
+-- ---------------------------------------------------------------------------
+-- ETL -- SECURITY DEFINER porque reconstruye TODOS los tenants de un jalón
+-- (como cancelacion_automatica_preasignados(), mismo patrón ya en el
+-- esquema); RLS de las tablas dw_* sigue filtrando qué ve cada quien al leer.
+-- ---------------------------------------------------------------------------
+CREATE OR REPLACE FUNCTION refrescar_dw_todo() RETURNS jsonb AS $$
+DECLARE
+  n_tenant int; n_geo int; n_emp int; n_pue int; n_sit int; n_cli int;
+  n_asis int; n_cob int; n_res int; n_pag int; n_fac int;
+BEGIN
+  INSERT INTO dw_dim_tenant (id, razon_social, vertical)
+    SELECT id, razon_social, vertical FROM te_tenants
+    ON CONFLICT (id) DO UPDATE SET razon_social = excluded.razon_social, vertical = excluded.vertical;
+  GET DIAGNOSTICS n_tenant = ROW_COUNT;
+
+  INSERT INTO dw_dim_geografia (tenant_id, estado_id, estado_nombre, region)
+    SELECT DISTINCT s.tenant_id, e.id, e.nombre, dw_region_de_estado(e.nombre)
+    FROM tc_sitios s JOIN tc_estados_mx e ON e.id = s.id_estado
+    ON CONFLICT (tenant_id, estado_id) DO UPDATE SET estado_nombre = excluded.estado_nombre, region = excluded.region;
+  GET DIAGNOSTICS n_geo = ROW_COUNT;
+
+  INSERT INTO dw_dim_empleado (id, tenant_id, folio, nombre_completo, regimen_pago, tipo_empleado, activo, puesto_principal_id)
+    SELECT id, tenant_id, folio, trim(nombres || ' ' || apellido_paterno || ' ' || coalesce(apellido_materno, '')),
+           regimen_pago, tipo_empleado, activo, id_puesto_principal
+    FROM te_empleados
+    ON CONFLICT (id) DO UPDATE SET nombre_completo = excluded.nombre_completo, activo = excluded.activo,
+      regimen_pago = excluded.regimen_pago, tipo_empleado = excluded.tipo_empleado, puesto_principal_id = excluded.puesto_principal_id;
+  GET DIAGNOSTICS n_emp = ROW_COUNT;
+
+  INSERT INTO dw_dim_puesto (id, tenant_id, titulo, unidad_negocio, pago_default, regimen_pago)
+    SELECT p.id, p.tenant_id, p.titulo, un.titulo, p.pago_default, p.regimen_pago
+    FROM tc_puestos p LEFT JOIN tc_unidades_negocio un ON un.id = p.id_unidad_negocio
+    ON CONFLICT (id) DO UPDATE SET titulo = excluded.titulo, unidad_negocio = excluded.unidad_negocio,
+      pago_default = excluded.pago_default, regimen_pago = excluded.regimen_pago;
+  GET DIAGNOSTICS n_pue = ROW_COUNT;
+
+  INSERT INTO dw_dim_sitio (id, tenant_id, titulo, tipo_sitio, geografia_id, latitud, longitud, codigo_postal)
+    SELECT s.id, s.tenant_id, s.titulo, s.tipo_sitio, g.id, s.latitud, s.longitud, s.codigo_postal
+    FROM tc_sitios s LEFT JOIN dw_dim_geografia g ON g.tenant_id = s.tenant_id AND g.estado_id = s.id_estado
+    ON CONFLICT (id) DO UPDATE SET titulo = excluded.titulo, tipo_sitio = excluded.tipo_sitio,
+      geografia_id = excluded.geografia_id, latitud = excluded.latitud, longitud = excluded.longitud, codigo_postal = excluded.codigo_postal;
+  GET DIAGNOSTICS n_sit = ROW_COUNT;
+
+  INSERT INTO dw_dim_cliente (id, tenant_id, razon_social, rfc)
+    SELECT id, tenant_id, razon_social, rfc FROM tc_clientes
+    ON CONFLICT (id) DO UPDATE SET razon_social = excluded.razon_social, rfc = excluded.rfc;
+  GET DIAGNOSTICS n_cli = ROW_COUNT;
+
+  DELETE FROM dw_hecho_asistencia_diaria;
+  INSERT INTO dw_hecho_asistencia_diaria
+    (tenant_id, fecha, empleado_id, puesto_id, sitio_id, turnos_programados, turnos_asistidos,
+     turnos_falta, turnos_retardo, horas_trabajadas, pct_puntualidad_promedio, penalizacion_dias, penalizacion_sueldo)
+  SELECT
+    r.tenant_id, r.cita_inicio::date, r.empleado_id,
+    (array_agg(r.puesto_id ORDER BY r.cita_inicio))[1],
+    (array_agg(r.sitio_id ORDER BY r.cita_inicio))[1],
+    count(*) FILTER (WHERE r.estado NOT IN ('cancelado','disponible')),
+    count(*) FILTER (WHERE r.estado_asistencia = 'asistencia'),
+    count(*) FILTER (WHERE r.estado_asistencia = 'falta'),
+    count(*) FILTER (WHERE r.estado_asistencia = 'retardo'),
+    round(coalesce(sum(EXTRACT(epoch FROM (r.hora_salida_real - r.hora_entrada_real)) / 3600.0)
+      FILTER (WHERE r.hora_entrada_real IS NOT NULL AND r.hora_salida_real IS NOT NULL), 0)::numeric, 2),
+    round((avg(r.porcentaje_puntualidad) FILTER (WHERE r.porcentaje_puntualidad IS NOT NULL) * 100)::numeric, 2),
+    coalesce(sum(r.penalizacion_dias), 0),
+    coalesce(sum(r.penalizacion_sueldo), 0)
+  FROM te_reservaciones r
+  WHERE r.empleado_id IS NOT NULL AND r.cita_inicio::date BETWEEN '2020-01-01' AND '2030-12-31'
+  GROUP BY r.tenant_id, r.cita_inicio::date, r.empleado_id;
+  GET DIAGNOSTICS n_asis = ROW_COUNT;
+
+  DELETE FROM dw_hecho_cobertura_sitio_dia;
+  INSERT INTO dw_hecho_cobertura_sitio_dia
+    (tenant_id, fecha, sitio_id, puestos_requeridos, puestos_cubiertos, puestos_confirmados, puestos_preasignados, pct_cobertura)
+  SELECT
+    p.tenant_id, coalesce(pd.fecha_cita, p.fecha_evento), p.sitio_id,
+    sum(pd.cantidad),
+    sum((SELECT count(*) FROM te_reservaciones r WHERE r.pedido_detalle_id = pd.id AND r.estado <> 'cancelado')),
+    sum((SELECT count(*) FROM te_reservaciones r WHERE r.pedido_detalle_id = pd.id AND r.estado IN ('confirmado_voluntario','confirmado_opcional','forzada','procesado'))),
+    sum((SELECT count(*) FROM te_reservaciones r WHERE r.pedido_detalle_id = pd.id AND r.estado = 'preasignado')),
+    round((sum((SELECT count(*) FROM te_reservaciones r WHERE r.pedido_detalle_id = pd.id AND r.estado <> 'cancelado'))::numeric
+           / NULLIF(sum(pd.cantidad), 0)) * 100, 2)
+  FROM te_pedidos_detalle pd
+  JOIN te_pedidos p ON p.id = pd.pedido_id
+  WHERE coalesce(pd.fecha_cita, p.fecha_evento) BETWEEN '2020-01-01' AND '2030-12-31'
+  GROUP BY p.tenant_id, coalesce(pd.fecha_cita, p.fecha_evento), p.sitio_id;
+  GET DIAGNOSTICS n_cob = ROW_COUNT;
+
+  DELETE FROM dw_hecho_reservaciones;
+  INSERT INTO dw_hecho_reservaciones
+    (id, tenant_id, fecha, empleado_id, puesto_id, sitio_id, estado, estado_asistencia,
+     duracion_en_turnos, costo_unit, porcentaje_puntualidad, penalizacion_dias, penalizacion_sueldo)
+  SELECT r.id, r.tenant_id, r.cita_inicio::date, r.empleado_id, r.puesto_id, r.sitio_id,
+         r.estado, r.estado_asistencia, r.duracion_en_turnos, pd.costo_unit,
+         r.porcentaje_puntualidad, r.penalizacion_dias, r.penalizacion_sueldo
+  FROM te_reservaciones r
+  LEFT JOIN te_pedidos_detalle pd ON pd.id = r.pedido_detalle_id
+  WHERE r.cita_inicio::date BETWEEN '2020-01-01' AND '2030-12-31';
+  GET DIAGNOSTICS n_res = ROW_COUNT;
+
+  DELETE FROM dw_hecho_pagos_dispersados;
+  INSERT INTO dw_hecho_pagos_dispersados
+    (id, tenant_id, fecha, empleado_id, monto, monto_bruto, monto_neto, penalizaciones, regimen_pago, status)
+  SELECT d.id, d.tenant_id, coalesce(d.dispersado_en::date, d.creado_en::date), d.empleado_id,
+         d.monto, nd.monto_bruto, nd.monto_neto, nd.penalizaciones_aplicadas, nd.regimen_pago, d.status
+  FROM te_pagos_dispersion d
+  LEFT JOIN te_nomina_detalle nd ON nd.id = d.nomina_detalle_id
+  WHERE coalesce(d.dispersado_en::date, d.creado_en::date) BETWEEN '2020-01-01' AND '2030-12-31';
+  GET DIAGNOSTICS n_pag = ROW_COUNT;
+
+  DELETE FROM dw_hecho_facturas_cliente;
+  INSERT INTO dw_hecho_facturas_cliente (id, tenant_id, fecha, cliente_id, subtotal, iva, total, status)
+    SELECT id, tenant_id, fecha_emision, cliente_id, subtotal, iva, total, status
+    FROM te_facturas_enc
+    WHERE fecha_emision BETWEEN '2020-01-01' AND '2030-12-31';
+  GET DIAGNOSTICS n_fac = ROW_COUNT;
+
+  RETURN jsonb_build_object(
+    'refrescado_en', now(),
+    'dim_tenant', n_tenant, 'dim_geografia', n_geo, 'dim_empleado', n_emp, 'dim_puesto', n_pue,
+    'dim_sitio', n_sit, 'dim_cliente', n_cli,
+    'hecho_asistencia_diaria', n_asis, 'hecho_cobertura_sitio_dia', n_cob, 'hecho_reservaciones', n_res,
+    'hecho_pagos_dispersados', n_pag, 'hecho_facturas_cliente', n_fac
+  );
+END $$ LANGUAGE plpgsql SECURITY DEFINER;
+GRANT EXECUTE ON FUNCTION refrescar_dw_todo() TO anon, authenticated, service_role;
+
+-- ---------------------------------------------------------------------------
+-- 24 vistas = 6 métricas x 4 cortes (semana/mes/trimestre/año).
+-- ---------------------------------------------------------------------------
+CREATE OR REPLACE VIEW v_asistencia_por_semana AS
+SELECT h.tenant_id, dt.anio_iso AS anio, dt.etiqueta_semana AS periodo,
+  sum(h.turnos_programados) AS turnos_programados, sum(h.turnos_asistidos) AS turnos_asistidos,
+  sum(h.turnos_falta) AS turnos_falta, sum(h.turnos_retardo) AS turnos_retardo,
+  sum(h.horas_trabajadas) AS horas_trabajadas,
+  round(avg(h.pct_puntualidad_promedio) FILTER (WHERE h.pct_puntualidad_promedio IS NOT NULL), 2) AS pct_puntualidad_promedio
+FROM dw_hecho_asistencia_diaria h JOIN dw_dim_tiempo_dia dt ON dt.fecha = h.fecha
+GROUP BY h.tenant_id, dt.anio_iso, dt.etiqueta_semana;
+
+CREATE OR REPLACE VIEW v_asistencia_por_mes AS
+SELECT h.tenant_id, dt.anio, dt.etiqueta_mes AS periodo,
+  sum(h.turnos_programados) AS turnos_programados, sum(h.turnos_asistidos) AS turnos_asistidos,
+  sum(h.turnos_falta) AS turnos_falta, sum(h.turnos_retardo) AS turnos_retardo,
+  sum(h.horas_trabajadas) AS horas_trabajadas,
+  round(avg(h.pct_puntualidad_promedio) FILTER (WHERE h.pct_puntualidad_promedio IS NOT NULL), 2) AS pct_puntualidad_promedio
+FROM dw_hecho_asistencia_diaria h JOIN dw_dim_tiempo_dia dt ON dt.fecha = h.fecha
+GROUP BY h.tenant_id, dt.anio, dt.etiqueta_mes;
+
+CREATE OR REPLACE VIEW v_asistencia_por_trimestre AS
+SELECT h.tenant_id, dt.anio, dt.etiqueta_trimestre AS periodo,
+  sum(h.turnos_programados) AS turnos_programados, sum(h.turnos_asistidos) AS turnos_asistidos,
+  sum(h.turnos_falta) AS turnos_falta, sum(h.turnos_retardo) AS turnos_retardo,
+  sum(h.horas_trabajadas) AS horas_trabajadas,
+  round(avg(h.pct_puntualidad_promedio) FILTER (WHERE h.pct_puntualidad_promedio IS NOT NULL), 2) AS pct_puntualidad_promedio
+FROM dw_hecho_asistencia_diaria h JOIN dw_dim_tiempo_dia dt ON dt.fecha = h.fecha
+GROUP BY h.tenant_id, dt.anio, dt.etiqueta_trimestre;
+
+CREATE OR REPLACE VIEW v_asistencia_por_anio AS
+SELECT h.tenant_id, dt.anio, dt.anio::text AS periodo,
+  sum(h.turnos_programados) AS turnos_programados, sum(h.turnos_asistidos) AS turnos_asistidos,
+  sum(h.turnos_falta) AS turnos_falta, sum(h.turnos_retardo) AS turnos_retardo,
+  sum(h.horas_trabajadas) AS horas_trabajadas,
+  round(avg(h.pct_puntualidad_promedio) FILTER (WHERE h.pct_puntualidad_promedio IS NOT NULL), 2) AS pct_puntualidad_promedio
+FROM dw_hecho_asistencia_diaria h JOIN dw_dim_tiempo_dia dt ON dt.fecha = h.fecha
+GROUP BY h.tenant_id, dt.anio;
+
+CREATE OR REPLACE VIEW v_cobertura_por_sitio_semana AS
+SELECT h.tenant_id, dt.anio_iso AS anio, dt.etiqueta_semana AS periodo, h.sitio_id, s.titulo AS sitio,
+  sum(h.puestos_requeridos) AS puestos_requeridos, sum(h.puestos_cubiertos) AS puestos_cubiertos,
+  round((sum(h.puestos_cubiertos)::numeric / NULLIF(sum(h.puestos_requeridos), 0)) * 100, 2) AS pct_cobertura
+FROM dw_hecho_cobertura_sitio_dia h
+JOIN dw_dim_tiempo_dia dt ON dt.fecha = h.fecha
+JOIN dw_dim_sitio s ON s.id = h.sitio_id
+GROUP BY h.tenant_id, dt.anio_iso, dt.etiqueta_semana, h.sitio_id, s.titulo;
+
+CREATE OR REPLACE VIEW v_cobertura_por_sitio_mes AS
+SELECT h.tenant_id, dt.anio, dt.etiqueta_mes AS periodo, h.sitio_id, s.titulo AS sitio,
+  sum(h.puestos_requeridos) AS puestos_requeridos, sum(h.puestos_cubiertos) AS puestos_cubiertos,
+  round((sum(h.puestos_cubiertos)::numeric / NULLIF(sum(h.puestos_requeridos), 0)) * 100, 2) AS pct_cobertura
+FROM dw_hecho_cobertura_sitio_dia h
+JOIN dw_dim_tiempo_dia dt ON dt.fecha = h.fecha
+JOIN dw_dim_sitio s ON s.id = h.sitio_id
+GROUP BY h.tenant_id, dt.anio, dt.etiqueta_mes, h.sitio_id, s.titulo;
+
+CREATE OR REPLACE VIEW v_cobertura_por_sitio_trimestre AS
+SELECT h.tenant_id, dt.anio, dt.etiqueta_trimestre AS periodo, h.sitio_id, s.titulo AS sitio,
+  sum(h.puestos_requeridos) AS puestos_requeridos, sum(h.puestos_cubiertos) AS puestos_cubiertos,
+  round((sum(h.puestos_cubiertos)::numeric / NULLIF(sum(h.puestos_requeridos), 0)) * 100, 2) AS pct_cobertura
+FROM dw_hecho_cobertura_sitio_dia h
+JOIN dw_dim_tiempo_dia dt ON dt.fecha = h.fecha
+JOIN dw_dim_sitio s ON s.id = h.sitio_id
+GROUP BY h.tenant_id, dt.anio, dt.etiqueta_trimestre, h.sitio_id, s.titulo;
+
+CREATE OR REPLACE VIEW v_cobertura_por_sitio_anio AS
+SELECT h.tenant_id, dt.anio, dt.anio::text AS periodo, h.sitio_id, s.titulo AS sitio,
+  sum(h.puestos_requeridos) AS puestos_requeridos, sum(h.puestos_cubiertos) AS puestos_cubiertos,
+  round((sum(h.puestos_cubiertos)::numeric / NULLIF(sum(h.puestos_requeridos), 0)) * 100, 2) AS pct_cobertura
+FROM dw_hecho_cobertura_sitio_dia h
+JOIN dw_dim_tiempo_dia dt ON dt.fecha = h.fecha
+JOIN dw_dim_sitio s ON s.id = h.sitio_id
+GROUP BY h.tenant_id, dt.anio, h.sitio_id, s.titulo;
+
+CREATE OR REPLACE VIEW v_pagos_por_regimen_semana AS
+SELECT h.tenant_id, dt.anio_iso AS anio, dt.etiqueta_semana AS periodo, h.regimen_pago,
+  count(*) AS num_pagos, sum(h.monto_bruto) AS monto_bruto_total, sum(h.monto_neto) AS monto_neto_total,
+  sum(h.penalizaciones) AS penalizaciones_total
+FROM dw_hecho_pagos_dispersados h JOIN dw_dim_tiempo_dia dt ON dt.fecha = h.fecha
+GROUP BY h.tenant_id, dt.anio_iso, dt.etiqueta_semana, h.regimen_pago;
+
+CREATE OR REPLACE VIEW v_pagos_por_regimen_mes AS
+SELECT h.tenant_id, dt.anio, dt.etiqueta_mes AS periodo, h.regimen_pago,
+  count(*) AS num_pagos, sum(h.monto_bruto) AS monto_bruto_total, sum(h.monto_neto) AS monto_neto_total,
+  sum(h.penalizaciones) AS penalizaciones_total
+FROM dw_hecho_pagos_dispersados h JOIN dw_dim_tiempo_dia dt ON dt.fecha = h.fecha
+GROUP BY h.tenant_id, dt.anio, dt.etiqueta_mes, h.regimen_pago;
+
+CREATE OR REPLACE VIEW v_pagos_por_regimen_trimestre AS
+SELECT h.tenant_id, dt.anio, dt.etiqueta_trimestre AS periodo, h.regimen_pago,
+  count(*) AS num_pagos, sum(h.monto_bruto) AS monto_bruto_total, sum(h.monto_neto) AS monto_neto_total,
+  sum(h.penalizaciones) AS penalizaciones_total
+FROM dw_hecho_pagos_dispersados h JOIN dw_dim_tiempo_dia dt ON dt.fecha = h.fecha
+GROUP BY h.tenant_id, dt.anio, dt.etiqueta_trimestre, h.regimen_pago;
+
+CREATE OR REPLACE VIEW v_pagos_por_regimen_anio AS
+SELECT h.tenant_id, dt.anio, dt.anio::text AS periodo, h.regimen_pago,
+  count(*) AS num_pagos, sum(h.monto_bruto) AS monto_bruto_total, sum(h.monto_neto) AS monto_neto_total,
+  sum(h.penalizaciones) AS penalizaciones_total
+FROM dw_hecho_pagos_dispersados h JOIN dw_dim_tiempo_dia dt ON dt.fecha = h.fecha
+GROUP BY h.tenant_id, dt.anio, h.regimen_pago;
+
+CREATE OR REPLACE VIEW v_facturas_por_cliente_semana AS
+SELECT h.tenant_id, dt.anio_iso AS anio, dt.etiqueta_semana AS periodo, h.cliente_id, c.razon_social AS cliente,
+  count(*) AS num_facturas, sum(h.subtotal) AS subtotal_total, sum(h.iva) AS iva_total, sum(h.total) AS total_facturado
+FROM dw_hecho_facturas_cliente h
+JOIN dw_dim_tiempo_dia dt ON dt.fecha = h.fecha
+LEFT JOIN dw_dim_cliente c ON c.id = h.cliente_id
+GROUP BY h.tenant_id, dt.anio_iso, dt.etiqueta_semana, h.cliente_id, c.razon_social;
+
+CREATE OR REPLACE VIEW v_facturas_por_cliente_mes AS
+SELECT h.tenant_id, dt.anio, dt.etiqueta_mes AS periodo, h.cliente_id, c.razon_social AS cliente,
+  count(*) AS num_facturas, sum(h.subtotal) AS subtotal_total, sum(h.iva) AS iva_total, sum(h.total) AS total_facturado
+FROM dw_hecho_facturas_cliente h
+JOIN dw_dim_tiempo_dia dt ON dt.fecha = h.fecha
+LEFT JOIN dw_dim_cliente c ON c.id = h.cliente_id
+GROUP BY h.tenant_id, dt.anio, dt.etiqueta_mes, h.cliente_id, c.razon_social;
+
+CREATE OR REPLACE VIEW v_facturas_por_cliente_trimestre AS
+SELECT h.tenant_id, dt.anio, dt.etiqueta_trimestre AS periodo, h.cliente_id, c.razon_social AS cliente,
+  count(*) AS num_facturas, sum(h.subtotal) AS subtotal_total, sum(h.iva) AS iva_total, sum(h.total) AS total_facturado
+FROM dw_hecho_facturas_cliente h
+JOIN dw_dim_tiempo_dia dt ON dt.fecha = h.fecha
+LEFT JOIN dw_dim_cliente c ON c.id = h.cliente_id
+GROUP BY h.tenant_id, dt.anio, dt.etiqueta_trimestre, h.cliente_id, c.razon_social;
+
+CREATE OR REPLACE VIEW v_facturas_por_cliente_anio AS
+SELECT h.tenant_id, dt.anio, dt.anio::text AS periodo, h.cliente_id, c.razon_social AS cliente,
+  count(*) AS num_facturas, sum(h.subtotal) AS subtotal_total, sum(h.iva) AS iva_total, sum(h.total) AS total_facturado
+FROM dw_hecho_facturas_cliente h
+JOIN dw_dim_tiempo_dia dt ON dt.fecha = h.fecha
+LEFT JOIN dw_dim_cliente c ON c.id = h.cliente_id
+GROUP BY h.tenant_id, dt.anio, h.cliente_id, c.razon_social;
+
+CREATE OR REPLACE VIEW v_margen_por_puesto_semana AS
+SELECT h.tenant_id, dt.anio_iso AS anio, dt.etiqueta_semana AS periodo, h.puesto_id, p.titulo AS puesto,
+  sum(coalesce(h.costo_unit, 0) * h.duracion_en_turnos) AS ingreso_total,
+  sum(coalesce(p.pago_default, 0) * h.duracion_en_turnos) AS costo_total,
+  sum(coalesce(h.costo_unit, 0) * h.duracion_en_turnos) - sum(coalesce(p.pago_default, 0) * h.duracion_en_turnos) AS margen_total
+FROM dw_hecho_reservaciones h
+JOIN dw_dim_tiempo_dia dt ON dt.fecha = h.fecha
+LEFT JOIN dw_dim_puesto p ON p.id = h.puesto_id
+WHERE h.estado <> 'cancelado'
+GROUP BY h.tenant_id, dt.anio_iso, dt.etiqueta_semana, h.puesto_id, p.titulo;
+
+CREATE OR REPLACE VIEW v_margen_por_puesto_mes AS
+SELECT h.tenant_id, dt.anio, dt.etiqueta_mes AS periodo, h.puesto_id, p.titulo AS puesto,
+  sum(coalesce(h.costo_unit, 0) * h.duracion_en_turnos) AS ingreso_total,
+  sum(coalesce(p.pago_default, 0) * h.duracion_en_turnos) AS costo_total,
+  sum(coalesce(h.costo_unit, 0) * h.duracion_en_turnos) - sum(coalesce(p.pago_default, 0) * h.duracion_en_turnos) AS margen_total
+FROM dw_hecho_reservaciones h
+JOIN dw_dim_tiempo_dia dt ON dt.fecha = h.fecha
+LEFT JOIN dw_dim_puesto p ON p.id = h.puesto_id
+WHERE h.estado <> 'cancelado'
+GROUP BY h.tenant_id, dt.anio, dt.etiqueta_mes, h.puesto_id, p.titulo;
+
+CREATE OR REPLACE VIEW v_margen_por_puesto_trimestre AS
+SELECT h.tenant_id, dt.anio, dt.etiqueta_trimestre AS periodo, h.puesto_id, p.titulo AS puesto,
+  sum(coalesce(h.costo_unit, 0) * h.duracion_en_turnos) AS ingreso_total,
+  sum(coalesce(p.pago_default, 0) * h.duracion_en_turnos) AS costo_total,
+  sum(coalesce(h.costo_unit, 0) * h.duracion_en_turnos) - sum(coalesce(p.pago_default, 0) * h.duracion_en_turnos) AS margen_total
+FROM dw_hecho_reservaciones h
+JOIN dw_dim_tiempo_dia dt ON dt.fecha = h.fecha
+LEFT JOIN dw_dim_puesto p ON p.id = h.puesto_id
+WHERE h.estado <> 'cancelado'
+GROUP BY h.tenant_id, dt.anio, dt.etiqueta_trimestre, h.puesto_id, p.titulo;
+
+CREATE OR REPLACE VIEW v_margen_por_puesto_anio AS
+SELECT h.tenant_id, dt.anio, dt.anio::text AS periodo, h.puesto_id, p.titulo AS puesto,
+  sum(coalesce(h.costo_unit, 0) * h.duracion_en_turnos) AS ingreso_total,
+  sum(coalesce(p.pago_default, 0) * h.duracion_en_turnos) AS costo_total,
+  sum(coalesce(h.costo_unit, 0) * h.duracion_en_turnos) - sum(coalesce(p.pago_default, 0) * h.duracion_en_turnos) AS margen_total
+FROM dw_hecho_reservaciones h
+JOIN dw_dim_tiempo_dia dt ON dt.fecha = h.fecha
+LEFT JOIN dw_dim_puesto p ON p.id = h.puesto_id
+WHERE h.estado <> 'cancelado'
+GROUP BY h.tenant_id, dt.anio, h.puesto_id, p.titulo;
+
+CREATE OR REPLACE VIEW v_top_empleados_puntualidad_semana AS
+SELECT h.tenant_id, dt.anio_iso AS anio, dt.etiqueta_semana AS periodo, h.empleado_id, e.nombre_completo,
+  sum(h.turnos_asistidos + h.turnos_falta + h.turnos_retardo) AS turnos_totales,
+  round(avg(h.pct_puntualidad_promedio) FILTER (WHERE h.pct_puntualidad_promedio IS NOT NULL), 2) AS pct_puntualidad_promedio
+FROM dw_hecho_asistencia_diaria h
+JOIN dw_dim_tiempo_dia dt ON dt.fecha = h.fecha
+JOIN dw_dim_empleado e ON e.id = h.empleado_id
+GROUP BY h.tenant_id, dt.anio_iso, dt.etiqueta_semana, h.empleado_id, e.nombre_completo
+ORDER BY pct_puntualidad_promedio DESC NULLS LAST;
+
+CREATE OR REPLACE VIEW v_top_empleados_puntualidad AS
+SELECT h.tenant_id, dt.anio, dt.etiqueta_mes AS periodo, h.empleado_id, e.nombre_completo,
+  sum(h.turnos_asistidos + h.turnos_falta + h.turnos_retardo) AS turnos_totales,
+  round(avg(h.pct_puntualidad_promedio) FILTER (WHERE h.pct_puntualidad_promedio IS NOT NULL), 2) AS pct_puntualidad_promedio
+FROM dw_hecho_asistencia_diaria h
+JOIN dw_dim_tiempo_dia dt ON dt.fecha = h.fecha
+JOIN dw_dim_empleado e ON e.id = h.empleado_id
+GROUP BY h.tenant_id, dt.anio, dt.etiqueta_mes, h.empleado_id, e.nombre_completo
+ORDER BY pct_puntualidad_promedio DESC NULLS LAST;
+
+CREATE OR REPLACE VIEW v_top_empleados_puntualidad_trimestre AS
+SELECT h.tenant_id, dt.anio, dt.etiqueta_trimestre AS periodo, h.empleado_id, e.nombre_completo,
+  sum(h.turnos_asistidos + h.turnos_falta + h.turnos_retardo) AS turnos_totales,
+  round(avg(h.pct_puntualidad_promedio) FILTER (WHERE h.pct_puntualidad_promedio IS NOT NULL), 2) AS pct_puntualidad_promedio
+FROM dw_hecho_asistencia_diaria h
+JOIN dw_dim_tiempo_dia dt ON dt.fecha = h.fecha
+JOIN dw_dim_empleado e ON e.id = h.empleado_id
+GROUP BY h.tenant_id, dt.anio, dt.etiqueta_trimestre, h.empleado_id, e.nombre_completo
+ORDER BY pct_puntualidad_promedio DESC NULLS LAST;
+
+CREATE OR REPLACE VIEW v_top_empleados_puntualidad_anio AS
+SELECT h.tenant_id, dt.anio, dt.anio::text AS periodo, h.empleado_id, e.nombre_completo,
+  sum(h.turnos_asistidos + h.turnos_falta + h.turnos_retardo) AS turnos_totales,
+  round(avg(h.pct_puntualidad_promedio) FILTER (WHERE h.pct_puntualidad_promedio IS NOT NULL), 2) AS pct_puntualidad_promedio
+FROM dw_hecho_asistencia_diaria h
+JOIN dw_dim_tiempo_dia dt ON dt.fecha = h.fecha
+JOIN dw_dim_empleado e ON e.id = h.empleado_id
+GROUP BY h.tenant_id, dt.anio, h.empleado_id, e.nombre_completo
+ORDER BY pct_puntualidad_promedio DESC NULLS LAST;
+
+GRANT SELECT ON
+  v_asistencia_por_semana, v_asistencia_por_mes, v_asistencia_por_trimestre, v_asistencia_por_anio,
+  v_cobertura_por_sitio_semana, v_cobertura_por_sitio_mes, v_cobertura_por_sitio_trimestre, v_cobertura_por_sitio_anio,
+  v_pagos_por_regimen_semana, v_pagos_por_regimen_mes, v_pagos_por_regimen_trimestre, v_pagos_por_regimen_anio,
+  v_facturas_por_cliente_semana, v_facturas_por_cliente_mes, v_facturas_por_cliente_trimestre, v_facturas_por_cliente_anio,
+  v_margen_por_puesto_semana, v_margen_por_puesto_mes, v_margen_por_puesto_trimestre, v_margen_por_puesto_anio,
+  v_top_empleados_puntualidad_semana, v_top_empleados_puntualidad, v_top_empleados_puntualidad_trimestre, v_top_empleados_puntualidad_anio
+TO anon, authenticated, service_role;
+
+-- ---------------------------------------------------------------------------
+-- Carga periódica -- pg_cron estaba disponible pero no instalado en este
+-- proyecto (confirmado vía list_extensions). Se habilita y se programa
+-- refrescar_dw_todo() todos los días a las 03:00 UTC (21:00 CDMX).
+-- ---------------------------------------------------------------------------
+CREATE EXTENSION IF NOT EXISTS pg_cron;
+
+SELECT cron.schedule(
+  'dw_refresh_diario',
+  '0 3 * * *',
+  $$SELECT refrescar_dw_todo();$$
+) WHERE NOT EXISTS (SELECT 1 FROM cron.job WHERE jobname = 'dw_refresh_diario');
+
+-- Primera corrida real, para que el DW no se quede vacío hasta la madrugada.
+SELECT refrescar_dw_todo();
+
+-- ============================================================================

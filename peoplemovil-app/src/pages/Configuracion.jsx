@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import TablaWrap from '../components/ui/TablaWrap.jsx';
 import KpiCard from '../components/ui/KpiCard.jsx';
+import { tituloConLinea } from '../components/ui/CardHeader.jsx';
 import { supabase, supabaseReady, DEMO_TENANT_ID } from '../lib/supabase.js';
 import { useModuleAudit, logAccion } from '../lib/audit.js';
 
@@ -43,7 +44,7 @@ export default function Configuracion() {
 
       <div className="card">
         <div className="section-eyebrow">Parámetros globales</div>
-        <h3 style={{ marginTop: 4 }}>tp_parametros_globales</h3>
+        <h3 style={{ ...tituloConLinea, marginTop: 4 }}>⚙️ tp_parametros_globales</h3>
         {!params ? <p style={{ fontSize: 12, color: 'var(--muted)' }}>Cargando…</p> : (
           <>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 14 }}>
@@ -69,7 +70,7 @@ export default function Configuracion() {
         )}
       </div>
 
-      <h3>Parámetros por puesto (<code>tc_puestos</code>)</h3>
+      <h3 style={tituloConLinea}>🧩 Parámetros por puesto (<code>tc_puestos</code>)</h3>
       <TablaWrap>
         <table>
           <thead>

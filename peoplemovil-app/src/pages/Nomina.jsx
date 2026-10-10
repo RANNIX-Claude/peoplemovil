@@ -3,6 +3,7 @@ import Modal from '../components/ui/Modal.jsx';
 import TablaWrap from '../components/ui/TablaWrap.jsx';
 import Badge from '../components/ui/Badge.jsx';
 import KpiCard from '../components/ui/KpiCard.jsx';
+import { tituloConLinea } from '../components/ui/CardHeader.jsx';
 import { supabase, supabaseReady, DEMO_TENANT_ID } from '../lib/supabase.js';
 import { useModuleAudit, logAccion } from '../lib/audit.js';
 
@@ -60,7 +61,7 @@ export default function Nomina() {
 
       <div className="card">
         <div className="section-eyebrow">Precauciones antes de cierre</div>
-        <h3 style={{ marginTop: 4 }}>PRC_ReportePrecaucionesNomina</h3>
+        <h3 style={{ ...tituloConLinea, marginTop: 4 }}>⚠️ PRC_ReportePrecaucionesNomina</h3>
         {precauciones.length === 0
           ? <p style={{ fontSize: 12, color: 'var(--muted)' }}>Sin precauciones. Todo el personal está listo para dispersión.</p>
           : <ul style={{ listStyle: 'none', fontSize: 12 }}>
@@ -73,7 +74,7 @@ export default function Nomina() {
             </ul>}
       </div>
 
-      <h3>Periodos de nómina</h3>
+      <h3 style={tituloConLinea}>💰 Periodos de nómina</h3>
       <TablaWrap>
         <table>
           <thead>
@@ -99,7 +100,7 @@ export default function Nomina() {
 
       {seleccion && (
         <>
-          <h3>Detalle del periodo {seleccion.fecha_desde} → {seleccion.fecha_hasta}</h3>
+          <h3 style={tituloConLinea}>📄 Detalle del periodo {seleccion.fecha_desde} → {seleccion.fecha_hasta}</h3>
           <TablaWrap>
             <table>
               <thead>

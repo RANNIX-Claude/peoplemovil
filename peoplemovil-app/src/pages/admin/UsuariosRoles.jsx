@@ -4,6 +4,7 @@ import TablaWrap from '../../components/ui/TablaWrap.jsx';
 import Badge from '../../components/ui/Badge.jsx';
 import Chip from '../../components/ui/Chip.jsx';
 import KpiCard from '../../components/ui/KpiCard.jsx';
+import { tituloConLinea } from '../../components/ui/CardHeader.jsx';
 import { useModuleAudit } from '../../lib/audit.js';
 
 // HU 9.03 — Usuarios, Roles y Perfiles
@@ -40,7 +41,7 @@ export default function UsuariosRoles() {
       </div>
 
       <div className="card">
-        <h3>Roles del sistema</h3>
+        <h3 style={tituloConLinea}>🛡️ Roles del sistema</h3>
         <div className="chips">
           {ROLES.map(r => <Chip key={r} active={filtroRol === r} onClick={() => setFiltroRol(filtroRol === r ? 'todos' : r)}>{r}</Chip>)}
         </div>
@@ -50,7 +51,7 @@ export default function UsuariosRoles() {
         </p>
       </div>
 
-      <h3>Empleados y su acceso</h3>
+      <h3 style={tituloConLinea}>👤 Empleados y su acceso</h3>
       <TablaWrap>
         <table>
           <thead>

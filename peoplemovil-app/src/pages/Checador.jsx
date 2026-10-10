@@ -4,6 +4,7 @@ import Chip from '../components/ui/Chip.jsx';
 import TablaWrap from '../components/ui/TablaWrap.jsx';
 import KpiCard from '../components/ui/KpiCard.jsx';
 import Modal from '../components/ui/Modal.jsx';
+import { tituloConLinea } from '../components/ui/CardHeader.jsx';
 import { supabase, supabaseReady, DEMO_TENANT_ID } from '../lib/supabase.js';
 import { useModuleAudit, logAccion } from '../lib/audit.js';
 
@@ -119,7 +120,7 @@ export default function Checador() {
         </p>
       </div>
 
-      <h3>Últimos 50 marcajes (append-only)</h3>
+      <h3 style={tituloConLinea}>🕐 Últimos 50 marcajes (append-only)</h3>
       <TablaWrap>
         <table>
           <thead>

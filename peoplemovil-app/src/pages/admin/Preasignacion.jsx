@@ -5,6 +5,7 @@ import TablaWrap from '../../components/ui/TablaWrap.jsx';
 import Badge from '../../components/ui/Badge.jsx';
 import Modal from '../../components/ui/Modal.jsx';
 import KpiCard from '../../components/ui/KpiCard.jsx';
+import { tituloConLinea } from '../../components/ui/CardHeader.jsx';
 import { useModuleAudit, logAccion } from '../../lib/audit.js';
 
 // HU 2.04 — Pre-asignación de personal
@@ -138,7 +139,7 @@ export default function Preasignacion() {
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 2fr', gap: 16, alignItems: 'start' }}>
         {/* Columna izquierda: lista de detalles */}
         <div>
-          <h3>Detalles activos</h3>
+          <h3 style={tituloConLinea}>📋 Detalles activos</h3>
           <div style={{ display: 'grid', gap: 6 }}>
             {detalles.length === 0 && <p style={{ fontSize: 12, color: 'var(--muted)' }}>Sin detalles.</p>}
             {detalles.map(d => (
@@ -170,7 +171,7 @@ export default function Preasignacion() {
                 <KpiCard label="Disponibles con plaza" value={disponibles.length} sub={selDetalle.tc_puestos?.titulo} color="var(--accent2)" />
               </div>
 
-              <h3>Reservados actuales</h3>
+              <h3 style={tituloConLinea}>✅ Reservados actuales</h3>
               <TablaWrap>
                 <table>
                   <thead>
@@ -200,7 +201,7 @@ export default function Preasignacion() {
                 </table>
               </TablaWrap>
 
-              <h3>Empleados con plaza disponible</h3>
+              <h3 style={tituloConLinea}>👥 Empleados con plaza disponible</h3>
               <TablaWrap>
                 <table>
                   <thead>
@@ -226,7 +227,7 @@ export default function Preasignacion() {
                 </table>
               </TablaWrap>
 
-              <h3>Buscar cualquier empleado</h3>
+              <h3 style={tituloConLinea}>🔎 Buscar cualquier empleado</h3>
               <div className="card" style={{ padding: 12, marginBottom: 12 }}>
                 <label className="label">Nombre completo / Alias</label>
                 <input className="field" placeholder="Escribí al menos 2 letras…" value={busqueda}

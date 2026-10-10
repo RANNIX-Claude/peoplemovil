@@ -7,6 +7,7 @@ import Chip from '../components/ui/Chip.jsx';
 import KpiCard from '../components/ui/KpiCard.jsx';
 import ToggleVista from '../components/ui/ToggleVista.jsx';
 import AnilloPorcentaje from '../components/ui/AnilloPorcentaje.jsx';
+import { tituloConLinea } from '../components/ui/CardHeader.jsx';
 import { supabase, supabaseReady, DEMO_TENANT_ID } from '../lib/supabase.js';
 import { useModuleAudit, logAccion } from '../lib/audit.js';
 import { resolverUrlArchivo } from '../lib/storage.js';
@@ -57,11 +58,11 @@ function agruparPor(empleados, getEtiqueta) {
   return [...map.entries()].sort((a, b) => b[1] - a[1]);
 }
 
-function TablaPivot({ titulo, filas, onFiltrar }) {
+function TablaPivot({ titulo, icono, filas, onFiltrar }) {
   const total = filas.reduce((s, [, n]) => s + n, 0);
   return (
     <div className="card">
-      <h3 style={{ marginTop: 0 }}>{titulo}</h3>
+      <h3 style={tituloConLinea}>{icono} {titulo}</h3>
       {filas.length === 0 && <p style={{ fontSize: 12, color: 'var(--muted)' }}>Sin datos con los filtros actuales.</p>}
       {filas.map(([label, n]) => (
         <div key={label} style={{ marginBottom: 10, cursor: onFiltrar ? 'pointer' : 'default' }}
@@ -265,10 +266,10 @@ export default function Personal() {
 
           {vista === 'resumen' && (
             <div className="card-grid" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))' }}>
-              <TablaPivot titulo="Por puesto" filas={porPuesto} onFiltrar={v => { setFiltroPuesto(v); setVista('lista'); }} />
-              <TablaPivot titulo="Por sitio" filas={porSitio} onFiltrar={v => { setFiltroSitio(v); setVista('lista'); }} />
-              <TablaPivot titulo="Por régimen de pago" filas={porRegimen} onFiltrar={v => { setFiltroRegimen(v); setVista('lista'); }} />
-              <TablaPivot titulo="Por tipo de empleado" filas={porTipo} />
+              <TablaPivot titulo="Por puesto" icono="💼" filas={porPuesto} onFiltrar={v => { setFiltroPuesto(v); setVista('lista'); }} />
+              <TablaPivot titulo="Por sitio" icono="📍" filas={porSitio} onFiltrar={v => { setFiltroSitio(v); setVista('lista'); }} />
+              <TablaPivot titulo="Por régimen de pago" icono="💰" filas={porRegimen} onFiltrar={v => { setFiltroRegimen(v); setVista('lista'); }} />
+              <TablaPivot titulo="Por tipo de empleado" icono="🏷️" filas={porTipo} />
             </div>
           )}
         </>
