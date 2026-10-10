@@ -106,11 +106,16 @@ function construirAniosLaborales(fechaAlta, periodos) {
   return anios.reverse();
 }
 
+// Campo de solo-lectura en "renglón": línea divisoria debajo para que el
+// grid se lea como filas (como el RH de referencia), no como huecos sueltos.
+// Etiqueta chica/gris vs. valor más grande/oscuro -- contraste deliberado.
 function Campo({ label, valor }) {
   return (
-    <div>
+    <div style={{ borderBottom: '1px solid var(--border)', paddingBottom: 10 }}>
       <div className="label">{label}</div>
-      <div style={{ fontSize: 13 }}>{valor || <span style={{ color: 'var(--muted)' }}>—</span>}</div>
+      <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--text)' }}>
+        {valor || <span style={{ color: 'var(--muted)', fontWeight: 400 }}>—</span>}
+      </div>
     </div>
   );
 }
@@ -130,13 +135,16 @@ function ArchivoLink({ path, label = 'Ver ↗' }) {
 }
 
 const gridAuto = { display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(170px, 1fr))', gap: 16 };
+const tituloConLinea = { marginTop: 0, marginBottom: 12, paddingBottom: 10, borderBottom: '1px solid var(--border)' };
 const CAP_TIPOS = { interna: 'activo', externa: 'pendiente', certificacion: 'proceso' };
 
-// Encabezado de card con botón "Editar" opcional (gateado por permiso desde el padre).
-function CardHeader({ titulo, onEditar }) {
+// Encabezado de card con ícono + botón "Editar" opcional (gateado por permiso
+// desde el padre) -- mismo criterio visual que el módulo RH de referencia
+// (IRPAPP): cada card se identifica de un vistazo por su ícono.
+function CardHeader({ titulo, icono, onEditar }) {
   return (
-    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
-      <h3 style={{ margin: 0 }}>{titulo}</h3>
+    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12, paddingBottom: 10, borderBottom: '1px solid var(--border)' }}>
+      <h3 style={{ margin: 0, display: 'flex', alignItems: 'center', gap: 8 }}>{icono && <span aria-hidden="true">{icono}</span>}{titulo}</h3>
       {onEditar && <button className="btn ghost sm" onClick={onEditar}>✎ Editar</button>}
     </div>
   );
@@ -682,7 +690,7 @@ export default function ExpedienteEmpleado() {
           </div>
 
           <div className="card">
-            <h3 style={{ marginTop: 0 }}>Información laboral</h3>
+            <h3 style={tituloConLinea}>💼 Información laboral</h3>
             <div style={gridAuto}>
               <Campo label="Régimen de pago" valor={empleado.regimen_pago} />
               <Campo label="Ciclo de pago" valor={empleado.ciclo_pago} />
@@ -692,7 +700,7 @@ export default function ExpedienteEmpleado() {
           </div>
 
           <div className="card">
-            <h3 style={{ marginTop: 0 }}>Documentos recientes</h3>
+            <h3 style={tituloConLinea}>📄 Documentos recientes</h3>
             <TablaWrap>
               <table>
                 <thead><tr><th>Tipo</th><th>Vigencia</th><th>Registrado</th><th></th></tr></thead>
@@ -712,7 +720,7 @@ export default function ExpedienteEmpleado() {
           </div>
 
           <div className="card">
-            <h3 style={{ marginTop: 0 }}>Actividad reciente</h3>
+            <h3 style={tituloConLinea}>📜 Actividad reciente</h3>
             {movimientos.length === 0 && <p style={{ fontSize: 12, color: 'var(--muted)' }}>Sin movimientos registrados.</p>}
             {movimientos.slice(0, 5).map(m => (
               <div key={m.id} style={{ fontSize: 12, padding: '6px 0', borderBottom: '1px solid var(--border)' }}>
@@ -734,7 +742,7 @@ export default function ExpedienteEmpleado() {
           )}
 
           <div className="card">
-            <CardHeader titulo="Información laboral" onEditar={puedeEditar ? () => setEditSectionKey('laboral') : undefined} />
+            <CardHeader titulo="Información laboral" icono="💼" onEditar={puedeEditar ? () => setEditSectionKey('laboral') : undefined} />
             <div style={gridAuto}>
               <Campo label="Folio" valor={'#' + empleado.folio} />
               <Campo label="Estado" valor={<Badge estado={empleado.activo ? 'activo' : 'inactivo'}>{empleado.activo ? 'ACTIVO' : 'BAJA'}</Badge>} />
@@ -754,7 +762,7 @@ export default function ExpedienteEmpleado() {
           </div>
 
           <div className="card">
-            <CardHeader titulo="Datos bancarios" onEditar={puedeEditar ? () => setCuentaModalOpen(true) : undefined} />
+            <CardHeader titulo="Datos bancarios" icono="🏦" onEditar={puedeEditar ? () => setCuentaModalOpen(true) : undefined} />
             <div style={gridAuto}>
               <Campo label="Banco" valor={empleado.banco?.nombre} />
               <Campo label="Cuenta" valor={<span className="mono">{empleado.cuenta_bancaria}</span>} />
@@ -792,7 +800,7 @@ export default function ExpedienteEmpleado() {
           </div>
 
           <div className="card">
-            <h3 style={{ marginTop: 0 }}>Puntualidad global</h3>
+            <h3 style={tituloConLinea}>⏱️ Puntualidad global</h3>
             <Semaforo porcentaje={empleado.porcentaje_puntualidad_global || 0} />
           </div>
         </>
@@ -801,7 +809,7 @@ export default function ExpedienteEmpleado() {
       {tab === 'personal' && (
         <>
           <div className="card">
-            <CardHeader titulo="Identidad" onEditar={puedeEditar ? () => setEditSectionKey('identidad') : undefined} />
+            <CardHeader titulo="Identidad" icono="🪪" onEditar={puedeEditar ? () => setEditSectionKey('identidad') : undefined} />
             <div style={gridAuto}>
               <Campo label="RFC" valor={empleado.rfc && <span className="mono">{empleado.rfc}</span>} />
               <Campo label="CURP" valor={empleado.curp && <span className="mono">{empleado.curp}</span>} />
@@ -816,7 +824,7 @@ export default function ExpedienteEmpleado() {
           </div>
 
           <div className="card">
-            <CardHeader titulo="Domicilio" onEditar={puedeEditar ? () => setEditSectionKey('domicilio') : undefined} />
+            <CardHeader titulo="Domicilio" icono="🏠" onEditar={puedeEditar ? () => setEditSectionKey('domicilio') : undefined} />
             <div style={gridAuto}>
               <Campo label="Calle y número" valor={[empleado.calle, empleado.numero_exterior].filter(Boolean).join(' #') + (empleado.numero_interior ? ` int. ${empleado.numero_interior}` : '')} />
               <Campo label="Colonia" valor={empleado.colonia} />
@@ -829,7 +837,7 @@ export default function ExpedienteEmpleado() {
           </div>
 
           <div className="card">
-            <CardHeader titulo="Documentos de identidad (folio)" onEditar={puedeEditar ? () => setEditSectionKey('docsIdentidad') : undefined} />
+            <CardHeader titulo="Documentos de identidad (folio)" icono="🗂️" onEditar={puedeEditar ? () => setEditSectionKey('docsIdentidad') : undefined} />
             <div style={gridAuto}>
               <Campo label="Credencial de elector" valor={empleado.credencial_elector} />
               <Campo label="Cartilla militar" valor={empleado.cartilla} />
@@ -837,7 +845,7 @@ export default function ExpedienteEmpleado() {
           </div>
 
           <div className="card">
-            <CardHeader titulo="Perfil académico" onEditar={puedeEditar ? () => setEditSectionKey('academico') : undefined} />
+            <CardHeader titulo="Perfil académico" icono="🎓" onEditar={puedeEditar ? () => setEditSectionKey('academico') : undefined} />
             <div style={gridAuto}>
               <Campo label="Grado de estudios" valor={empleado.grado_estudios} />
               <Campo label="Licenciatura / curso" valor={empleado.licenciatura_curso} />
@@ -846,7 +854,7 @@ export default function ExpedienteEmpleado() {
           </div>
 
           <div className="card">
-            <CardHeader titulo="Emergencia y salud" onEditar={puedeEditar ? () => setEditSectionKey('emergencia') : undefined} />
+            <CardHeader titulo="Emergencia y salud" icono="🚑" onEditar={puedeEditar ? () => setEditSectionKey('emergencia') : undefined} />
             <div style={gridAuto}>
               <Campo label="Contacto de emergencia" valor={empleado.contacto_emergencia} />
               <Campo label="Datos médicos" valor={empleado.datos_medicos} />
@@ -858,7 +866,7 @@ export default function ExpedienteEmpleado() {
       {tab === 'documentos' && (
         <>
           <div className="card">
-            <h3 style={{ marginTop: 0 }}>Documentos obligatorios ({requeridosCubiertos.length}/{requeridos.length})</h3>
+            <h3 style={tituloConLinea}>📄 Documentos obligatorios ({requeridosCubiertos.length}/{requeridos.length})</h3>
             <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
               {requeridos.map(t => {
                 const ok = documentos.some(d => d.tipo_documento_id === t.id);
@@ -908,7 +916,7 @@ export default function ExpedienteEmpleado() {
           <div className="card">
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 10 }}>
               <div>
-                <h3 style={{ margin: 0 }}>Saldo de vacaciones</h3>
+                <h3 style={{ margin: 0 }}>🏖️ Saldo de vacaciones</h3>
                 <p style={{ fontSize: 12, color: 'var(--muted)', margin: '4px 0 0' }}>
                   {aniosLaborales.length} año{aniosLaborales.length === 1 ? '' : 's'} laboral{aniosLaborales.length === 1 ? '' : 'es'} · {totalDisponibles} días disponibles en total
                 </p>
@@ -937,7 +945,7 @@ export default function ExpedienteEmpleado() {
           ))}
 
           <div className="card">
-            <h3 style={{ marginTop: 0 }}>Períodos tomados</h3>
+            <h3 style={tituloConLinea}>🗓️ Períodos tomados</h3>
             <TablaWrap>
               <table>
                 <thead><tr><th>Año</th><th>Período</th><th>Días</th><th>Prima vacacional</th><th>Estado</th><th></th></tr></thead>
@@ -1034,7 +1042,7 @@ export default function ExpedienteEmpleado() {
       {tab === 'beneficios' && (
         <>
           <div className="card">
-            <h3 style={{ marginTop: 0 }}>Catálogo de prestaciones del tenant</h3>
+            <h3 style={tituloConLinea}>❤️ Catálogo de prestaciones del tenant</h3>
             <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
               {tiposBeneficio.map(t => {
                 const asignado = beneficios.some(b => b.tipo_beneficio_id === t.id && b.activo);
