@@ -3,6 +3,7 @@ import toast from 'react-hot-toast';
 import { supabase, supabaseReady } from '../../lib/supabase.js';
 import Badge from '../../components/ui/Badge.jsx';
 import Modal from '../../components/ui/Modal.jsx';
+import AgendaCalendario from '../../components/freelance/AgendaCalendario.jsx';
 
 const fmtFecha = iso => new Date(iso).toLocaleString('es-MX', {
   weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit'
@@ -142,6 +143,10 @@ export default function MisEventos() {
             </div>
           </div>
         </div>
+      </div>
+
+      <div style={{ marginBottom: 32 }}>
+        <AgendaCalendario eventos={eventos} />
       </div>
 
       <h3>Pasados ({pasados.length})</h3>
