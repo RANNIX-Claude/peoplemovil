@@ -43,7 +43,6 @@ import Postularme from './pages/public/Postularme.jsx';
 import FreelanceShell from './components/freelance/FreelanceShell.jsx';
 import FreelanceLogin from './pages/freelance/FreelanceLogin.jsx';
 import MisEventos from './pages/freelance/MisEventos.jsx';
-import Publicaciones from './pages/freelance/Publicaciones.jsx';
 import MiPerfil from './pages/freelance/MiPerfil.jsx';
 import MisPagos from './pages/freelance/MisPagos.jsx';
 
@@ -95,10 +94,13 @@ export default function App() {
         </Route>
 
         <Route path="/portal" element={<FreelanceShell />}>
-          <Route index element={<Navigate to="publicaciones" replace />} />
+          <Route index element={<Navigate to="mis-eventos" replace />} />
           <Route path="login" element={<FreelanceLogin />} />
           <Route path="mis-eventos" element={<MisEventos />} />
-          <Route path="publicaciones" element={<Publicaciones />} />
+          {/* Ofertas se fusionó dentro de Mis Eventos (columna izquierda) --
+              se deja el redirect para no romper links viejos (ej. el correo
+              de notif-publicar-detalle.js). */}
+          <Route path="publicaciones" element={<Navigate to="/portal/mis-eventos" replace />} />
           <Route path="mis-pagos" element={<MisPagos />} />
           <Route path="perfil" element={<MiPerfil />} />
         </Route>

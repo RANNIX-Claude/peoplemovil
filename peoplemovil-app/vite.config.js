@@ -12,7 +12,7 @@ export default defineConfig({
         name: 'PeopleMovil — Portal Freelance',
         short_name: 'PeopleMovil',
         description: 'Bolsa de trabajo y confirmación de eventos para colaboradores freelance de PeopleMovil.',
-        start_url: '/portal/publicaciones',
+        start_url: '/portal/mis-eventos',
         scope: '/',
         display: 'standalone',
         background_color: '#F5F5F7',

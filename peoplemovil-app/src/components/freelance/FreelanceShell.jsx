@@ -75,7 +75,6 @@ export default function FreelanceShell() {
           display: 'flex', justifyContent: 'space-around', padding: '10px 0',
           zIndex: 10
         }}>
-          <BottomLink to="/portal/publicaciones" icon="📋" label="Ofertas" />
           <BottomLink to="/portal/mis-eventos" icon="📅" label="Mis eventos" />
           <BottomLink to="/portal/mis-pagos" icon="💰" label="Pagos" />
           <BottomLink to="/portal/perfil" icon="👤" label="Perfil" />
