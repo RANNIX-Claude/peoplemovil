@@ -173,16 +173,17 @@ code, pre, .mono { font-family: 'JetBrains Mono', 'Consolas', 'Courier New', mon
   margin-bottom: 20px;
 }
 
-/* Tarjeta de empleado (Personal.jsx, vista Mosaico) */
+/* Tarjeta de empleado (Personal.jsx, vista Mosaico) -- banda de color +
+   foto superpuesta, como el módulo RH de referencia (IRPAPP). */
 .emp-grid { grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); }
 .emp-card {
   background: var(--white);
   border: 1px solid var(--border);
   border-radius: 14px;
-  padding: 18px;
+  overflow: hidden;
   box-shadow: var(--card-sh);
   cursor: pointer;
-  display: flex; flex-direction: column; gap: 12px;
+  display: flex; flex-direction: column;
   transition: transform .14s, box-shadow .14s, border-color .14s;
 }
 .emp-card:hover {
@@ -190,20 +191,31 @@ code, pre, .mono { font-family: 'JetBrains Mono', 'Consolas', 'Courier New', mon
   box-shadow: 0 10px 28px rgba(0,0,0,.12);
   border-color: var(--accent);
 }
-.emp-card-head { display: flex; align-items: center; gap: 10px; }
-.emp-card-id { flex: 1; min-width: 0; }
+.emp-card-band {
+  background: var(--accent);
+  padding: 10px 14px;
+  display: flex; justify-content: flex-end; align-items: center;
+  min-height: 20px;
+}
+.emp-card-avatar { display: flex; justify-content: center; margin-top: -34px; }
+.emp-card-avatar > div { border: 3px solid var(--white); box-shadow: var(--card-sh); }
+.emp-card-id { text-align: center; padding: 8px 16px 0; }
 .emp-card-name {
   font-weight: 800; font-size: 14px; color: var(--text);
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
-.emp-card-folio { font-size: 11px; color: var(--muted); }
+.emp-card-folio { font-size: 11px; color: var(--muted); margin-top: 2px; }
 .emp-card-meta {
-  display: flex; flex-direction: column; gap: 4px;
+  display: flex; flex-direction: column; align-items: center; gap: 2px;
   font-size: 12px; color: var(--muted);
+  padding: 6px 16px 14px;
+  text-align: center;
 }
-.emp-card-semaforos { display: flex; flex-direction: column; gap: 6px; }
-.emp-card-semaforos .semaforo-pct { width: 32px; text-align: right; }
-.emp-card-foot { display: flex; justify-content: flex-end; }
+.emp-card-stats {
+  display: flex; justify-content: space-between; align-items: center;
+  padding: 12px 16px; border-top: 1px solid var(--border);
+}
+.emp-card-semaforos { display: flex; gap: 10px; }
 .emp-card-tarifa {
   display: inline-flex; align-items: center; gap: 4px;
   font-size: 11px; font-weight: 800; padding: 4px 10px; border-radius: 99px;
@@ -212,10 +224,19 @@ code, pre, .mono { font-family: 'JetBrains Mono', 'Consolas', 'Courier New', mon
 .emp-card-btn {
   width: 100%;
   background: var(--accent-tint2); color: var(--accent);
-  border: none; border-radius: 8px; padding: 9px; font-size: 12px; font-weight: 800;
+  border: none; border-radius: 0; padding: 10px; font-size: 12px; font-weight: 800;
   transition: background .14s, color .14s;
 }
 .emp-card:hover .emp-card-btn { background: var(--accent); color: #fff; }
+
+/* Anillo de porcentaje (conic-gradient) -- mismo criterio g/y/r que .semaforo
+   pero en formato circular, para el stats row de la tarjeta de empleado. */
+.anillo-pct { border-radius: 50%; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+.anillo-pct-inner {
+  border-radius: 50%; background: var(--white);
+  display: flex; align-items: center; justify-content: center;
+  font-weight: 800;
+}
 .section-eyebrow {
   font-size: 11px; font-weight: 700; letter-spacing: .08em;
   text-transform: uppercase; color: var(--accent);

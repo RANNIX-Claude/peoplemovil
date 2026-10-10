@@ -6,7 +6,6 @@ import Badge from '../components/ui/Badge.jsx';
 import Chip from '../components/ui/Chip.jsx';
 import KpiCard from '../components/ui/KpiCard.jsx';
 import ToggleVista from '../components/ui/ToggleVista.jsx';
-import Semaforo from '../components/Semaforo.jsx';
 import { supabase, supabaseReady, DEMO_TENANT_ID } from '../lib/supabase.js';
 import { useModuleAudit, logAccion } from '../lib/audit.js';
 import { resolverUrlArchivo } from '../lib/storage.js';
@@ -20,6 +19,19 @@ function completitud(e) {
 
 function iniciales(nombres, apPat) {
   return `${(nombres || '?').trim()[0] || ''}${(apPat || '').trim()[0] || ''}`.toUpperCase();
+}
+
+// Anillo de porcentaje -- mismo umbral g/y/r que <Semaforo>, en formato
+// circular para el stats row de la tarjeta de empleado.
+function AnilloPorcentaje({ porcentaje, size = 40 }) {
+  const p = Number(porcentaje) || 0;
+  const color = p >= 0.8 ? 'var(--green)' : p >= 0.6 ? 'var(--gold)' : 'var(--red)';
+  const pct = Math.round(p * 100);
+  return (
+    <div className="anillo-pct" style={{ width: size, height: size, background: `conic-gradient(${color} ${pct}%, var(--border) 0)` }}>
+      <div className="anillo-pct-inner" style={{ width: size - 8, height: size - 8, fontSize: size * 0.26, color }}>{pct}%</div>
+    </div>
+  );
 }
 
 // Avatar con foto (resuelta bajo demanda, puede ser URL pública demo o path
@@ -212,26 +224,26 @@ export default function Personal() {
                 const certeza = certezaMap.get(e.id + ':' + e.id_puesto_principal);
                 return (
                   <div key={e.id} className="emp-card" onClick={() => navigate('/admin/personal/' + e.id)}>
-                    <div className="emp-card-head">
-                      <Avatar empleado={e} size={48} />
-                      <div className="emp-card-id">
-                        <div className="emp-card-name">{e.nombres} {e.apellido_paterno}</div>
-                        <div className="emp-card-folio mono">Folio #{e.folio}</div>
-                      </div>
+                    <div className="emp-card-band">
                       <Badge estado={e.activo ? 'activo' : 'inactivo'}>{e.activo ? 'ACTIVO' : 'BAJA'}</Badge>
+                    </div>
+                    <div className="emp-card-avatar"><Avatar empleado={e} size={64} /></div>
+                    <div className="emp-card-id">
+                      <div className="emp-card-name">{e.nombres} {e.apellido_paterno}</div>
+                      <div className="emp-card-folio mono">Folio #{e.folio}</div>
                     </div>
                     <div className="emp-card-meta">
                       <span>💼 {e.puesto?.titulo || 'Sin puesto'}</span>
                       <span>📍 {e.sitio?.titulo || 'Sin sitio'}</span>
                     </div>
-                    <div className="emp-card-semaforos">
-                      <Semaforo porcentaje={completitud(e)} label="Expediente" />
-                      {certeza != null && <Semaforo porcentaje={certeza} label="Certeza" />}
-                    </div>
-                    <div className="emp-card-foot">
+                    <div className="emp-card-stats">
                       <span className="emp-card-tarifa">
                         💰 {e.puesto?.pago_default ? '$' + Number(e.puesto.pago_default).toLocaleString('es-MX') + '/día' : 'Sin tarifa'}
                       </span>
+                      <div className="emp-card-semaforos">
+                        <AnilloPorcentaje porcentaje={completitud(e)} />
+                        {certeza != null && <AnilloPorcentaje porcentaje={certeza} />}
+                      </div>
                     </div>
                     <button className="emp-card-btn">Ver expediente completo →</button>
                   </div>
