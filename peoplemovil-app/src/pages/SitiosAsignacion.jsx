@@ -191,18 +191,22 @@ export default function SitiosAsignacion() {
 
   const cargarDetallePedido = async (ped) => {
     setPedidoSel(ped); setPestana('general');
-    const [{ data: d }, { data: r }, { data: m }, { data: pepRow }] = await Promise.all([
-      supabase.from('te_pedidos_detalle').select('*, tc_puestos(titulo), tc_productos(titulo), tc_lugares_cita(titulo), tc_fases_evento(titulo)').eq('pedido_id', ped.id),
+    const [{ data: d }, { data: r }, { data: m }, { data: pepRow }, { data: contactoRow }] = await Promise.all([
+      supabase.from('te_pedidos_detalle').select('*, tc_puestos(titulo), tc_productos(titulo), tc_lugares_cita(titulo), tc_fases_evento(titulo), tc_presentaciones_producto(titulo)').eq('pedido_id', ped.id),
       supabase.from('te_reservaciones').select('*, te_empleados(nombres, apellido_paterno, folio)').eq('pedido_id', ped.id).limit(200),
       supabase.rpc('matriz_puestos_pedido', { p_pedido_id: ped.id }),
       ped.partida_presupuestal_id
         ? supabase.from('tc_partidas_presupuestales').select('id, clave_pep, descripcion').eq('id', ped.partida_presupuestal_id).maybeSingle()
+        : Promise.resolve({ data: null }),
+      ped.contacto_id
+        ? supabase.from('tc_contactos_cliente').select('id, nombre, telefono').eq('id', ped.contacto_id).maybeSingle()
         : Promise.resolve({ data: null })
     ]);
     setDetalles(d || []); setReservaciones(r || []); setMatrizFilas(m || []);
-    // Mezcla el PEP del pedido actual a la lista para que el lookup de la ficha lo encuentre
-    // aunque no se haya pasado por el formulario de alta (que es lo único que carga `peps`).
+    // Mezcla el PEP/contacto del pedido actual a sus listas para que el lookup de la ficha los
+    // encuentre aunque no se haya pasado por el formulario de alta (que es lo único que las carga).
     if (pepRow) setPeps(prev => (prev.some(p => p.id === pepRow.id) ? prev : [...prev, pepRow]));
+    if (contactoRow) setContactos(prev => (prev.some(c => c.id === contactoRow.id) ? prev : [...prev, contactoRow]));
   };
 
   // Pivotea matrizFilas (formato largo: una fila por fecha) a una matriz real:
@@ -251,7 +255,7 @@ export default function SitiosAsignacion() {
   // Popup "Detalle" al dar click en una celda de la Matriz de Puestos — equivalente
   // a la ventana del sistema legado (ID, Lugar de Cita, Fecha Cita, Fecha Fin Cita,
   // Fecha Liberación, Completar con Similares, Cantidad Reservados / Real / con
-  // Preasignados, Porcentaje Completo, Fase del Evento).
+  // Preasignados, Porcentaje Completo, Fase del Evento, Presentación).
   const verDetalleCelda = (pedidoDetalleId) => {
     const d = detalles.find(x => x.id === pedidoDetalleId);
     if (d) setCeldaDetalle(d);
@@ -644,7 +648,10 @@ export default function SitiosAsignacion() {
               <h3 style={tituloConLinea}>📦 Datos del pedido</h3>
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14, fontSize: 13 }}>
                 <div><div className="label">Cliente</div><div>{nombreCliente || '—'}</div></div>
-                <div><div className="label">Contacto</div><div>{pedidoSel.contacto_nombre || '—'} {pedidoSel.contacto_telefono ? `· ${pedidoSel.contacto_telefono}` : ''}</div></div>
+                <div><div className="label">Contacto</div><div>{(() => {
+                  const c = contactos.find(c => c.id === pedidoSel.contacto_id);
+                  return c ? `${c.nombre}${c.telefono ? ` · ${c.telefono}` : ''}` : '—';
+                })()}</div></div>
                 <div><div className="label">Sitio / inmueble</div><div>{nombreSitio}</div></div>
                 <div><div className="label">Lugar de cita</div><div>{lugaresCita.find(l => l.id === pedidoSel.lugar_cita_id)?.titulo || '—'}</div></div>
                 <div><div className="label">Unidad de negocio</div><div>{unidadesNegocio.find(u => u.id === pedidoSel.unidad_negocio_id)?.titulo || '—'}</div></div>
@@ -1008,6 +1015,9 @@ export default function SitiosAsignacion() {
               </div>
               <div><div className="label">Fase del Evento</div>
                 <div>{celdaDetalle.tc_fases_evento?.titulo || celdaDetalle.fase_evento_str || '—'}</div>
+              </div>
+              <div><div className="label">Presentación</div>
+                <div>{celdaDetalle.tc_presentaciones_producto?.titulo || '—'}</div>
               </div>
             </div>
           )}
