@@ -53,6 +53,7 @@ export default function SitiosAsignacion() {
   const [clientes, setClientes] = useState([]);
   const [filtroStatus, setFiltroStatus] = useState('todos');
   const [busqueda, setBusqueda] = useState('');
+  const [pedidosBusqueda, setPedidosBusqueda] = useState(null); // null = sin búsqueda activa (usa `pedidos`, los 100 más recientes)
 
   // --- catálogos para el registro de pedido ---
   const [unidadesNegocio, setUnidadesNegocio] = useState([]);
@@ -134,6 +135,24 @@ export default function SitiosAsignacion() {
     setFasesEvento(fev || []); setUniformes(unif || []); setSueldosMatriciales(smx || []);
   }
   useEffect(() => { cargar(); }, []);
+
+  // --- Buscador de pedidos: consulta la BD directamente (no solo los 100 más recientes
+  // ya cargados en `pedidos`) -- antes un folio/título fuera de esa ventana era
+  // "no encontrado" aunque existiera (H-006, Tests/corridas/2026-10-10_R1_ESC-02/hallazgos.md) ---
+  useEffect(() => {
+    if (!supabaseReady) return;
+    const q = busqueda.trim();
+    if (!q) { setPedidosBusqueda(null); return; }
+    const t = setTimeout(async () => {
+      const folioNum = /^\d+$/.test(q) ? Number(q) : -1;
+      const { data } = await supabase.from('te_pedidos').select('*')
+        .or(`folio.eq.${folioNum},titulo.ilike.%${q}%`)
+        .order('fecha_evento', { ascending: false })
+        .limit(100);
+      setPedidosBusqueda(data || []);
+    }, 300);
+    return () => clearTimeout(t);
+  }, [busqueda]);
 
   // --- Cliente elegido: cargar sus contactos y eventos ---
   useEffect(() => {
@@ -562,10 +581,10 @@ export default function SitiosAsignacion() {
     a.click();
   };
 
-  const pedidosFiltrados = useMemo(() => pedidos.filter(p =>
-    (filtroStatus === 'todos' || p.status === filtroStatus) &&
-    (!busqueda || `${p.folio} ${p.titulo}`.toLowerCase().includes(busqueda.toLowerCase()))
-  ), [pedidos, filtroStatus, busqueda]);
+  const pedidosFiltrados = useMemo(() => {
+    const base = pedidosBusqueda !== null ? pedidosBusqueda : pedidos;
+    return base.filter(p => filtroStatus === 'todos' || p.status === filtroStatus);
+  }, [pedidos, pedidosBusqueda, filtroStatus]);
 
   const kpiActivos = pedidos.filter(p => !['cancelado', 'procesado'].includes(p.status)).length;
   const kpiHoy = pedidos.filter(p => p.fecha_evento === new Date().toISOString().slice(0, 10)).length;
