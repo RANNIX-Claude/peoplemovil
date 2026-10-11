@@ -1,0 +1,474 @@
+id: ESC-03
+nombre: "Pedido PRG-Producción con complejidad y fase de evento"
+version: 2
+version_notas: >
+  v2 (2026-10-11, autorizó roberto.aguilar.cota@gmail.com): resueltos los 3 puntos
+  AMBIGUO de v1 (pasos 5, 8, 9) — ver campo decision_negocio en cada paso. El esperado
+  original de cada paso se conserva sin editar (regla §1.6 METODOLOGIA_QA.md);
+  el campo esperado_vigente dentro de decision_negocio es el que aplica para
+  clasificar CUMPLE/NO CUMPLE de aquí en adelante.
+fuente: "Dev/Tests/Plan_Pruebas_Freelance.xlsx / hoja ESC-03"
+numero_original: "Escenario 3"
+modulo: Pedidos
+sesion_sugerida: S03
+objetivo: >
+  Validar un pedido PRG sin complejidad con varios detalles por fase de evento
+  y arrastre de valores del detalle anterior.
+funcionalidades:
+  - Sin complejidad → solo Operativo
+  - Catálogo PRG
+  - Fases (Preparación, Montaje, Show, Desmontaje)
+  - Nuevo bloque por fase
+  - Valores heredados entre renglones del mismo producto
+dependencias_datos: "—"
+calidad_del_caso_excel: >
+  Paso 5 marcado Cumple y No cumple a la vez; esperado dice 'UN de seguridad'
+  (el caso real usa UN PRG). Paso 8: Tipo de movimiento 'Servicio Interno'
+  con esperado redactado para 'Pedido'.
+notas_originales: "—"
+
+# Riesgos conocidos (de la corrida previa ESC-02, misma pantalla Pedidos/Pedido Detalle,
+# ver Dev/Tests/corridas/2026-10-10_R1_ESC-02/bitacora.jsonl) — no se asumen como
+# precondición cumplida, el qa-tester debe confirmarlos o refutarlos en Fase 0/2:
+riesgos_conocidos:
+  - "PEPs de la UN PRG no tenían, en la corrida ESC-02, ningún id_lugar_predeterminado
+     ligado en tc_partidas_presupuestales (0 filas) — el paso 6 (autocompletar nombre/
+     dirección del inmueble) podría repetir el mismo PARCIAL ya observado en ESC-02 paso 6."
+  - "El combo 'Tipo de personal' mostró en ESC-02 los valores literales 'Personal
+     freelance / eventual', 'Personal interno de oficina', 'Personal de planta' —
+     no 'Staff'/'Operativo' como nombra el caso. Posible CAMBIO_NOMENCLATURA, no asumir
+     equivalencia sin confirmarla en el paso 12."
+  - "HALLAZGO CRÍTICO BLOQUEANTE en ESC-02 (paso 0, intento 4): el combo Producto del
+     modal 'Agregar detalle al pedido' solo ofrece productos con tc_productos.id_puesto
+     NULL; los productos reales con puesto ligado (matriciales, ej. los de PRG) no
+     aparecen y el alta se bloquea en silencio. Si 'Técnico Audio PRG - IN' tiene
+     id_puesto asignado, el paso 14 en adelante puede ser NO_EJECUTABLE por la misma
+     causa raíz — verificar en BD antes de ejecutar (precondición crítica, no forzar
+     con un producto sustituto sin avisar)."
+  - "tc_tipos_complejidad (Migración 022) solo tiene 6 valores reales por aforo; no hay
+     evidencia documentada de un valor catálogo literal 'No aplica'. El paso 9 pide
+     'indicar que No Aplica' — confirmar si existe esa opción en el combo o si
+     'sin complejidad' significa dejar tipo_complejidad_id en NULL sin seleccionar nada."
+
+precondiciones:
+  - "Cliente 'Ocesa Promotora, S.A. de C.V.' existe con al menos 1 contacto real en
+     tc_contactos_cliente (confirmado en Migración 032 / ESC-02 paso 3: Laura Mendez
+     Ruiz, tel. 5555123401)."
+  - "Unidad de negocio 'PRG' existe con al menos 1 PEP (tc_partidas_presupuestales)
+     vigente ligado a esa UN."
+  - "Producto 'Técnico Audio PRG - IN' existe en tc_productos, vigente=true, ligado
+     (vía tc_puestos) a la UN PRG — confirmar si tiene id_puesto asignado (ver
+     riesgos_conocidos)."
+  - "tc_fases_evento tiene los 5 valores reales de Lobo 2018: No aplica(0),
+     Preparación(1), Montaje(2), Show(3), Desmontaje(4) — Migración 011."
+
+datos_creados:
+  pedido: { titulo_prefijo: "QA-{corrida}-ESC003" }
+
+pasos:
+  - n: 1
+    paso_original: 1
+    descripcion: Crear un nuevo pedido
+    esperado: ""
+    calidad: null
+    legado: { resultado: Cumple, observacion: null, correccion: null }
+    accion: "Click en botón '+ Nuevo pedido' desde el módulo Pedidos y sitios"
+    verificar_ui: "Se abre el modal 'Registro de pedido'"
+    verificar_bd: null
+
+  - n: 2
+    paso_original: 2
+    descripcion: Seleccionar cliente Ocesa
+    esperado: ""
+    calidad: null
+    legado: { resultado: Cumple, observacion: null, correccion: null }
+    accion: "Seleccionar 'Ocesa Promotora, S.A. de C.V.' en el combo Cliente"
+    verificar_ui: "Combo Cliente muestra la razón social elegida"
+    verificar_bd: null
+
+  - n: 3
+    paso_original: 3
+    descripcion: Validar lista de contactos
+    esperado: "Los contactos mostrados deben pertenecer al cliente Ocesa"
+    calidad: null
+    legado: { resultado: Cumple, observacion: null, correccion: null }
+    accion: "Abrir el combo Contacto tras elegir cliente"
+    verificar_ui: "Las opciones del combo Contacto coinciden con la verificación en BD"
+    verificar_bd: |
+      SELECT id, nombre, telefono
+      FROM tc_contactos_cliente
+      WHERE cliente_id = '<cliente_id_elegido>';
+    esperado_bd: "Mismo conjunto de nombres/teléfonos que muestra el combo, sin contactos de otro cliente."
+
+  - n: 4
+    paso_original: 4
+    descripcion: Seleccionar un evento
+    esperado: ""
+    calidad: null
+    legado: { resultado: Cumple, observacion: null, correccion: null }
+    accion: "Elegir un evento real del combo Evento (cliente Ocesa)"
+    verificar_ui: "Combo Evento se llena con eventos del cliente elegido"
+    verificar_bd: null
+
+  - n: 5
+    paso_original: 5
+    descripcion: Seleccionar UN PRG
+    esperado: "El sistema despliega los PEPS de la UN de seguridad, y la sociedad pagadora (en este caso Lobo)"
+    calidad: "RESUELTO — ver decision_negocio. Esperado original conservado sin editar (regla §1.6)."
+    decision_negocio:
+      fecha: "2026-10-11"
+      autorizo: "roberto.aguilar.cota@gmail.com (usuario / negocio)"
+      resolucion: >
+        Error de copy/paste en el caso original: el texto 'UN de seguridad' se copió de
+        otro escenario de Seguridad. Este escenario siempre fue sobre UN PRG (confirmado
+        por el título 'ESC-03 — Pedido PRG-Producción...' y por los pasos 12-32, todos
+        de productos/fases PRG). No se cambia el flujo probado (sigue siendo UN PRG).
+      esperado_vigente: "El sistema despliega los PEPs de la UN PRG, y la sociedad pagadora correspondiente."
+    legado: { resultado: "Ambos marcados", observacion: "La sociedad pagadora por dafult está con ID 10", correccion: Corregido }
+    accion: "Seleccionar 'PRG' en el combo Unidad de negocio"
+    verificar_ui: "Combo PEP se llena con PEPs de la UN PRG; campo Sociedad pagadora refleja algún valor por default"
+    verificar_bd: |
+      SELECT id, titulo FROM tc_partidas_presupuestales
+      WHERE unidad_negocio_id = '<un_prg_id>' AND activo = true;
+    esperado_bd: "≥1 PEP vigente de la UN PRG, coincide con las opciones del combo."
+
+  - n: 6
+    paso_original: 6
+    descripcion: Seleccionar el PEPS asociado a la UN
+    esperado: "El sistema me muestra el nombre y la dirección del inmueble"
+    calidad: null
+    legado: { resultado: Cumple, observacion: null, correccion: null }
+    accion: "Elegir el PEP listado en el combo PEP"
+    verificar_ui: "Campos Sitio/Inmueble y Lugar de cita se autocompletan con nombre y dirección reales"
+    verificar_bd: |
+      SELECT id_lugar_predeterminado FROM tc_partidas_presupuestales WHERE id = '<pep_id>';
+      -- si no es NULL:
+      SELECT nombre, direccion FROM tc_lugares_cita WHERE id = '<id_lugar_predeterminado>';
+    esperado_bd: "id_lugar_predeterminado no NULL y el lugar tiene nombre/dirección reales — ver riesgos_conocidos, ESC-02 encontró PEPs de PRG sin este dato."
+    precondicion_critica: true
+
+  - n: 7
+    paso_original: 7
+    descripcion: Validar tipo de movimiento
+    esperado: "El sistema debe mostrar dos tipos de movimiento (Pedido y Servicio Interno)"
+    calidad: null
+    legado: { resultado: "No cumple", observacion: 'Únicamente muestra "pedido"', correccion: Corregido }
+    accion: "Abrir el combo Tipo de movimiento"
+    verificar_ui: "Listar las opciones visibles del combo"
+    verificar_bd: |
+      SELECT id, titulo FROM tc_tipos_movimiento_pedido WHERE tenant_id = '<tenant_id>';
+    esperado_bd: "Comparar catálogo real contra lo mostrado; el legado ya marcó corrección aplicada — confirmar si persiste o si cambió de nombre (CAMBIO_NOMENCLATURA)."
+
+  - n: 8
+    paso_original: 8
+    descripcion: Seleccionar Tipo de movimiento Servicio Interno
+    esperado: "EL tipo Pedido se factura (validar posteriormente)"
+    calidad: "RESUELTO — ver decision_negocio. Esperado original conservado sin editar (regla §1.6)."
+    decision_negocio:
+      fecha: "2026-10-11"
+      autorizo: "roberto.aguilar.cota@gmail.com (usuario / negocio)"
+      resolucion: >
+        No es un bug de este paso. 'Validar posteriormente' indica que el caso original
+        dejaba pendiente, para otro momento, probar el tipo de movimiento 'Pedido'
+        (que sí factura) — no este paso, que elige 'Servicio Interno' a propósito.
+        Para ESTE paso lo esperado real es que Servicio Interno NO facture, que es
+        justo lo que ya observó el legado ('Factura determinado como No por default').
+        Se abre tarea de backlog aparte para probar 'Pedido se factura' como caso propio
+        (no se mezcla con ESC-03).
+      esperado_vigente: "El tipo de movimiento 'Servicio Interno' queda marcado como no facturable por default."
+    legado: { resultado: "No cumple", observacion: "Factura está determinado como de No por default", correccion: Corregido }
+    accion: "Seleccionar la opción de tipo de movimiento equivalente a 'Servicio Interno'"
+    verificar_ui: "Estado de facturable/no facturable mostrado en el formulario"
+    verificar_bd: null
+
+  - n: 9
+    paso_original: 9
+    descripcion: En complejidad indicar que No Aplica
+    esperado: ""
+    calidad: "RESUELTO — ver decision_negocio."
+    decision_negocio:
+      fecha: "2026-10-11"
+      autorizo: "roberto.aguilar.cota@gmail.com (usuario / negocio)"
+      resolucion: >
+        'Sin complejidad' = dejar el combo Tipo de complejidad sin seleccionar nada;
+        tipo_complejidad_id queda NULL en BD. No se agrega ningún valor 'No aplica' al
+        catálogo tc_tipos_complejidad (que son los 6 valores reales por aforo de la
+        Migración 022) — no se inventa dato de catálogo sin precedente real.
+      esperado_vigente: "El combo Tipo de complejidad permite guardarse sin ningún valor seleccionado (tipo_complejidad_id = NULL)."
+    legado: { resultado: Cumple, observacion: null, correccion: null }
+    accion: "En el combo Tipo de complejidad, no seleccionar ningún valor"
+    verificar_ui: "Combo Tipo de complejidad queda en su estado placeholder/sin selección"
+    verificar_bd: null
+
+  - n: 10
+    paso_original: 10
+    descripcion: En el campo Permitir Cancelar, seleccionar NO
+    esperado: ""
+    calidad: null
+    legado: { resultado: "Sin ejecutar", observacion: null, correccion: null }
+    accion: "Click real (no form_input) en el checkbox 'Permitir cancelaciones' hasta dejarlo desmarcado"
+    verificar_ui: "Checkbox desmarcado"
+    verificar_bd: null
+
+  - n: 11
+    paso_original: 11
+    descripcion: Pulsar Aceptar
+    esperado: "El sistema genera un número consecutivo de pedido."
+    calidad: null
+    legado: { resultado: Cumple, observacion: null, correccion: null }
+    accion: "Click en Aceptar del modal Registro de pedido"
+    verificar_ui: "Toast/confirmación con folio consecutivo"
+    verificar_bd: |
+      SELECT folio, titulo, cliente_id, unidad_negocio_id, partida_presupuestal_id,
+             contacto_id, tipo_movimiento_id, tipo_complejidad_id, tipo_duracion_id,
+             duracion_dias, permitir_cancelaciones, status_facturacion, fecha_evento
+      FROM te_pedidos
+      WHERE titulo LIKE 'QA-{corrida}-ESC003%';
+    esperado_bd:
+      permitir_cancelaciones: false
+      tipo_complejidad_id: null
+    precondicion_critica: true
+
+  - n: 12
+    paso_original: 12
+    descripcion: Tipo de personal
+    esperado: "Validad que sólo se muestren Operativos al no tener complejidad"
+    calidad: "Ver riesgos_conocidos — en ESC-02 el combo mostró 'Personal freelance / eventual, Personal interno de oficina, Personal de planta', no 'Staff'/'Operativo'. Confirmar nomenclatura real antes de juzgar este paso."
+    legado: { resultado: Cumple, observacion: null, correccion: null }
+    accion: "Abrir modal 'Agregar detalle al pedido' y abrir el combo Tipo de personal"
+    verificar_ui: "Listar las opciones visibles"
+    verificar_bd: |
+      SELECT id, clave, descripcion FROM tc_tipos_personal WHERE tenant_id = '<tenant_id>';
+    esperado_bd: "Comparar catálogo real contra lo mostrado; confirmar si el filtrado por 'sin complejidad → solo Operativo' aplica a nivel UI."
+
+  - n: 13
+    paso_original: 13
+    descripcion: Seleccionar Operativo
+    esperado: ""
+    calidad: null
+    legado: { resultado: Cumple, observacion: null, correccion: null }
+    accion: "Elegir la opción equivalente a 'Operativo' en Tipo de personal"
+    verificar_ui: "Opción queda seleccionada"
+    verificar_bd: null
+
+  - n: 14
+    paso_original: 14
+    descripcion: "Producto: Técnico Audio PRG - IN"
+    esperado: "Validar que el catálogo mostrado es el de PRG"
+    calidad: null
+    legado: { resultado: Cumple, observacion: null, correccion: null }
+    accion: "Buscar y seleccionar 'Técnico Audio PRG - IN' en el combo Producto"
+    verificar_ui: "El producto aparece en el combo y queda seleccionado"
+    verificar_bd: |
+      SELECT p.id, p.titulo, p.id_puesto, p.vigente, pu.id_unidad_negocio
+      FROM tc_productos p
+      LEFT JOIN tc_puestos pu ON pu.id = p.id_puesto
+      WHERE p.titulo ILIKE '%Técnico Audio%PRG%';
+    esperado_bd: "Producto vigente=true, ligado (vía puesto) a la UN PRG. Precondición crítica: ver riesgos_conocidos — si id_puesto no es NULL, puede repetir el bloqueo del combo Producto ya documentado en ESC-02 paso 0 intento 4. Si el producto no aparece en la UI, detener el escenario aquí y registrar GAP_CATALOGO o BUG según corresponda, no sustituir en silencio."
+    precondicion_critica: true
+
+  - n: 15
+    paso_original: 15
+    descripcion: Validar la jornada
+    esperado: "Debe mostrar 1 turno por 12 horas"
+    calidad: null
+    legado: { resultado: Cumple, observacion: null, correccion: null }
+    accion: "Observar el indicador de jornada/duración de turno tras elegir el producto"
+    verificar_ui: "Jornada mostrada = 1 turno / 12 horas"
+    verificar_bd: |
+      SELECT duracion_turno_horas FROM tc_puestos WHERE id = '<id_puesto_del_producto>';
+    esperado_bd: "duracion_turno_horas = 12"
+
+  - n: 16
+    paso_original: 16
+    descripcion: Seleccionar una fecha de cita y de liberación
+    esperado: ""
+    calidad: null
+    legado: { resultado: Cumple, observacion: null, correccion: null }
+    accion: "Capturar Fecha de cita y Fecha de liberación (liberación anterior o igual a la cita)"
+    verificar_ui: "Campos capturados sin error de validación"
+    verificar_bd: null
+
+  - n: 17
+    paso_original: 17
+    descripcion: Presentación por producto
+    esperado: "Validar que nos se muestran presentaciones"
+    calidad: "Probable error de tecleo en el caso original: 'nos' → 'no'. Se conserva el texto original tal cual (regla §1.6); se interpreta como 'no se muestran presentaciones'."
+    legado: { resultado: Cumple, observacion: null, correccion: null }
+    accion: "Abrir el combo Presentación por producto"
+    verificar_ui: "Combo sin opciones reales (solo placeholder '-- sin presentación --')"
+    verificar_bd: |
+      SELECT * FROM tc_presentaciones_producto WHERE producto_id = '<id_producto>';
+    esperado_bd: "0 filas"
+
+  - n: 18
+    paso_original: 18
+    descripcion: Fase del evento
+    esperado: "Validar que se muestran todos los valores del catálogo de Fase de evento"
+    calidad: null
+    legado: { resultado: Cumple, observacion: null, correccion: null }
+    accion: "Abrir el combo Fase del evento"
+    verificar_ui: "Listar las opciones visibles"
+    verificar_bd: |
+      SELECT clave, titulo, orden FROM tc_fases_evento
+      WHERE tenant_id = '<tenant_id>' ORDER BY orden;
+    esperado_bd: "5 valores: No aplica(0), Preparación(1), Montaje(2), Show(3), Desmontaje(4) — Migración 011."
+
+  - n: 19
+    paso_original: 19
+    descripcion: Seleccionar Preparación como fase de evento
+    esperado: ""
+    calidad: null
+    legado: { resultado: Cumple, observacion: null, correccion: null }
+    accion: "Elegir 'Preparación' en el combo Fase del evento"
+    verificar_ui: "Opción queda seleccionada"
+    verificar_bd: null
+
+  - n: 20
+    paso_original: 20
+    descripcion: Agregar Registro
+    esperado: ""
+    calidad: null
+    legado: { resultado: Cumple, observacion: null, correccion: null }
+    accion: "Click en 'Agregar Registro' dentro del modal"
+    verificar_ui: "Modal se cierra o confirma alta; aparece un renglón nuevo en la matriz de detalle"
+    verificar_bd: |
+      SELECT id, puesto_id, producto_id, fase_evento_id, bloque_num
+      FROM te_pedidos_detalle
+      WHERE pedido_id = '<pedido_id>';
+    esperado_bd: "1 fila nueva con fase_evento_id = Preparación."
+
+  - n: 21
+    paso_original: 21
+    descripcion: Agregar nuevo pedido detalle
+    esperado: ""
+    calidad: null
+    legado: { resultado: Cumple, observacion: null, correccion: null }
+    accion: "Click en '+ Agregar detalle' para abrir un nuevo renglón"
+    verificar_ui: "Se abre el modal 'Agregar detalle al pedido' de nuevo"
+    verificar_bd: null
+
+  - n: 22
+    paso_original: 22
+    descripcion: "Producto: Técnico Audio PRG - IN"
+    esperado: "El sistema debe guardar el valor introducido anteriormente"
+    calidad: null
+    legado: { resultado: Cumple, observacion: "Se guarda todo, a excepción de los turnos y la cantidad", correccion: null }
+    accion: "Verificar si el formulario ya trae precargado el mismo producto/valores del renglón anterior (arrastre)"
+    verificar_ui: "Campos del formulario reflejan los valores heredados, salvo turnos y cantidad (gap ya documentado en el legado)"
+    verificar_bd: null
+
+  - n: 23
+    paso_original: 23
+    descripcion: "Fase del evento: Montaje"
+    esperado: ""
+    calidad: null
+    legado: { resultado: "No cumple", observacion: null, correccion: "EN PROCESO" }
+    accion: "Seleccionar 'Montaje' en el combo Fase del evento"
+    verificar_ui: "Opción queda seleccionada"
+    verificar_bd: null
+
+  - n: 24
+    paso_original: 24
+    descripcion: Agregar Registro
+    esperado: "Validar que se ha creado el nuevo bloque con el producto y los montos"
+    calidad: null
+    legado: { resultado: "No cumple", observacion: null, correccion: "EN PROCESO" }
+    accion: "Click en 'Agregar Registro'"
+    verificar_ui: "Nuevo bloque/renglón visible en la matriz con fase Montaje"
+    verificar_bd: |
+      SELECT id, bloque_num, fase_evento_id, precio, costo_por_nomina
+      FROM te_pedidos_detalle
+      WHERE pedido_id = '<pedido_id>' AND fase_evento_id = '<id_fase_montaje>';
+    esperado_bd: "1 fila nueva con montos calculados — el legado lo marca No cumple / EN PROCESO: confirmar si sigue fallando (SIGUE_FALLANDO) o fue corregido desde entonces."
+    precondicion_critica: true
+
+  - n: 25
+    paso_original: 25
+    descripcion: Agregar nuevo pedido detalle
+    esperado: ""
+    calidad: null
+    legado: { resultado: "No cumple", observacion: null, correccion: "EN PROCESO" }
+    accion: "Click en '+ Agregar detalle' para abrir otro renglón"
+    verificar_ui: "Se abre el modal nuevamente"
+    verificar_bd: null
+
+  - n: 26
+    paso_original: 26
+    descripcion: "Producto: Técnico Audio PRG - IN"
+    esperado: "El sistema debe guardar el valor introducido anteriormente"
+    calidad: null
+    legado: { resultado: "No cumple", observacion: null, correccion: "EN PROCESO" }
+    accion: "Verificar arrastre de valores del renglón anterior (Montaje)"
+    verificar_ui: "Campos heredados o no, según corresponda"
+    verificar_bd: null
+
+  - n: 27
+    paso_original: 27
+    descripcion: "Fase del evento: Show"
+    esperado: ""
+    calidad: null
+    legado: { resultado: "No cumple", observacion: null, correccion: "EN PROCESO" }
+    accion: "Seleccionar 'Show' en el combo Fase del evento"
+    verificar_ui: "Opción queda seleccionada"
+    verificar_bd: null
+
+  - n: 28
+    paso_original: 28
+    descripcion: Agregar Registro
+    esperado: "Validar que se ha creado el nuevo bloque con el producto y los montos"
+    calidad: null
+    legado: { resultado: "No cumple", observacion: null, correccion: "EN PROCESO" }
+    accion: "Click en 'Agregar Registro'"
+    verificar_ui: "Nuevo bloque/renglón visible en la matriz con fase Show"
+    verificar_bd: |
+      SELECT id, bloque_num, fase_evento_id, precio, costo_por_nomina
+      FROM te_pedidos_detalle
+      WHERE pedido_id = '<pedido_id>' AND fase_evento_id = '<id_fase_show>';
+    esperado_bd: "1 fila nueva con montos calculados."
+    precondicion_critica: true
+
+  - n: 29
+    paso_original: 29
+    descripcion: Agregar nuevo pedido detalle
+    esperado: ""
+    calidad: null
+    legado: { resultado: "No cumple", observacion: null, correccion: "EN PROCESO" }
+    accion: "Click en '+ Agregar detalle' para abrir otro renglón"
+    verificar_ui: "Se abre el modal nuevamente"
+    verificar_bd: null
+
+  - n: 30
+    paso_original: 30
+    descripcion: "Producto: Técnico Audio PRG - IN"
+    esperado: "El sistema debe guardar el valor introducido anteriormente"
+    calidad: null
+    legado: { resultado: "No cumple", observacion: null, correccion: "EN PROCESO" }
+    accion: "Verificar arrastre de valores del renglón anterior (Show)"
+    verificar_ui: "Campos heredados o no, según corresponda"
+    verificar_bd: null
+
+  - n: 31
+    paso_original: 31
+    descripcion: "Fase del evento: Desmontaje"
+    esperado: ""
+    calidad: null
+    legado: { resultado: "No cumple", observacion: null, correccion: "EN PROCESO" }
+    accion: "Seleccionar 'Desmontaje' en el combo Fase del evento"
+    verificar_ui: "Opción queda seleccionada"
+    verificar_bd: null
+
+  - n: 32
+    paso_original: 32
+    descripcion: Agregar Registro
+    esperado: "Validar que se ha creado el nuevo bloque con el producto y los montos"
+    calidad: null
+    legado: { resultado: "No cumple", observacion: null, correccion: "EN PROCESO" }
+    accion: "Click en 'Agregar Registro'"
+    verificar_ui: "Nuevo bloque/renglón visible en la matriz con fase Desmontaje"
+    verificar_bd: |
+      SELECT id, bloque_num, fase_evento_id, precio, costo_por_nomina
+      FROM te_pedidos_detalle
+      WHERE pedido_id = '<pedido_id>' AND fase_evento_id = '<id_fase_desmontaje>';
+    esperado_bd: "1 fila nueva con montos calculados. Al cierre del escenario debe haber 4 bloques (Preparación/Montaje/Show/Desmontaje) con el mismo producto, montos y fechas propias por bloque."
+    precondicion_critica: true

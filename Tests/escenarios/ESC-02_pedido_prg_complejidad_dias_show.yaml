@@ -1,0 +1,406 @@
+id: ESC-02
+nombre: "Pedido PRG con complejidad y días de show"
+version: 1
+version_notas: >
+  v1 (2026-10-11, autorizó roberto.aguilar.cota@gmail.com): primera conversión a YAML,
+  hecha después de ejecutar la corrida (orden inverso al flujo normal §4 Fase 1→2 —
+  esta corrida se ejecutó directo desde el Excel, ver Tests/corridas/2026-10-10_R1_ESC-02).
+  Incluye ya resueltos H-002 (paso 7-8) y H-003 (paso 13) — ver decision_negocio en cada
+  paso. El esperado original de cada paso se conserva sin editar (regla §1.6
+  METODOLOGIA_QA.md); el campo esperado_vigente dentro de decision_negocio es el que
+  aplica para clasificar CUMPLE/NO CUMPLE de aquí en adelante. H-005 (combo Producto vacío
+  para Staff/PRG) y H-006 (buscador no encontraba pedidos antiguos) también se resolvieron,
+  pero son defectos reales corregidos en código/datos, no decisiones de negocio sobre el
+  caso — ver hallazgos.md para el detalle de esas dos correcciones.
+fuente: "Dev/Tests/Plan_Pruebas_Freelance.xlsx / hoja ESC-02"
+numero_original: "Escenario 2"
+modulo: Pedidos
+sesion_sugerida: S02
+objetivo: >
+  Validar un pedido PRG con complejidad y días de show: personal Staff, bloques por
+  producto y presupuesto ligado a complejidad.
+funcionalidades:
+  - Complejidad
+  - Duración en días de show
+  - Tipo de personal Staff
+  - Catálogo PRG
+  - Jornada
+  - Fase de evento
+  - Bloques
+  - Presupuesto día
+dependencias_datos: "—"
+calidad_del_caso_excel: >
+  Paso 5 esperado dice "UN de seguridad" (copiado del Esc. 1, este caso siempre fue UN PRG).
+  Paso 7 texto corrupto en el Excel ("movi+E10:F10miento"). Paso 8 selecciona Servicio Interno
+  pero el esperado habla de "Pedido". Paso 18: "nos" probablemente es "no".
+notas_originales: "—"
+
+precondiciones:
+  - "Cliente 'Ocesa Promotora, S.A. de C.V.' existe con al menos 1 contacto real en
+     tc_contactos_cliente (Laura Mendez Ruiz, tel. 5555123401)."
+  - "Unidad de negocio 'PRG' existe con al menos 1 PEP (tc_partidas_presupuestales)
+     vigente ligado a esa UN."
+  - "tc_tipos_complejidad tiene los 6 valores reales vigentes (Migración 022)."
+  - "tp_sueldos_matriciales tiene tarifa real para al menos los puestos matriciales de
+     PRG usados en la prueba (Migración 033, resuelve H-005 — antes 0 filas)."
+
+datos_creados:
+  pedido: { titulo_prefijo: "QA-{corrida}-ESC02" }
+  nota: >
+    Se crearon 2 pedidos de prueba: #199 (fecha_evento real del evento, 2018-09-01 —
+    quedó invisible en listados por H-006, corregido) y #200 (fecha_evento futura,
+    2026-12-21 — usado para continuar los pasos 13+ antes del fix de H-006). Ambos se
+    dejaron en BD como evidencia, no se borraron.
+
+pasos:
+  - n: 1
+    paso_original: 1
+    descripcion: Crear un nuevo pedido
+    esperado: ""
+    calidad: null
+    legado: { resultado: Cumple, observacion: null, correccion: null }
+    r1: { resultado: CUMPLE, observacion: null }
+    accion: "Click en botón '+ Nuevo pedido' desde el módulo Pedidos y sitios"
+    verificar_ui: "Se abre el modal 'Registro de pedido'"
+    verificar_bd: null
+
+  - n: 2
+    paso_original: 2
+    descripcion: Seleccionar cliente Ocesa
+    esperado: ""
+    calidad: null
+    legado: { resultado: Cumple, observacion: null, correccion: null }
+    r1: { resultado: CUMPLE, observacion: null }
+    accion: "Seleccionar 'Ocesa Promotora, S.A. de C.V.' en el combo Cliente"
+    verificar_ui: "Combo Cliente muestra la razón social elegida (también existe 'Ocesa Presenta, S.A. de C.V.' como opción distinta)"
+    verificar_bd: null
+
+  - n: 3
+    paso_original: 3
+    descripcion: Validar lista de contactos
+    esperado: "Los contactos mostrados deben pertenecer al cliente Ocesa"
+    calidad: null
+    legado: { resultado: Cumple, observacion: null, correccion: null }
+    r1: { resultado: CUMPLE, observacion: "Contacto único verificado en BD (Laura Méndez Ruiz, tc_contactos_cliente)." }
+    accion: "Abrir el combo Contacto tras elegir cliente"
+    verificar_ui: "Las opciones del combo Contacto coinciden con la verificación en BD"
+    verificar_bd: |
+      SELECT id, nombre, telefono FROM tc_contactos_cliente WHERE cliente_id = '<cliente_id_elegido>';
+    esperado_bd: "Mismo conjunto de nombres/teléfonos que muestra el combo."
+
+  - n: 4
+    paso_original: 4
+    descripcion: Seleccionar un evento
+    esperado: ""
+    calidad: null
+    legado: { resultado: Cumple, observacion: null, correccion: null }
+    r1: { resultado: CUMPLE, observacion: "Título del pedido autocompleta desde el evento y es editable. Fecha del evento NO autocompleta (UX menor); se capturó a mano la fecha real del evento." }
+    accion: "Elegir 'Dreamstate Mexico 2018' del combo Evento (cliente Ocesa)"
+    verificar_ui: "Combo Evento se llena con eventos del cliente elegido; título del pedido se autocompleta"
+    verificar_bd: null
+
+  - n: 5
+    paso_original: 5
+    descripcion: Seleccionar UN PRG
+    esperado: "El sistema despliega los PEPS de la UN de seguridad, y la sociedad pagadora (en este caso Lobo)"
+    calidad: "Esperado copiado ('UN de seguridad') — error de copy/paste, el caso siempre fue sobre UN PRG."
+    legado: { resultado: Cumple, observacion: null, correccion: null }
+    r1: { resultado: CUMPLE, observacion: "9 PEPs reales de PRG mostrados correctamente. Sociedad pagadora no autocompleta (gap ya conocido en CLAUDE.md §11, no es de este caso)." }
+    accion: "Seleccionar 'PRG' en el combo Unidad de negocio"
+    verificar_ui: "Combo PEP se llena con PEPs de la UN PRG"
+    verificar_bd: |
+      SELECT id, titulo FROM tc_partidas_presupuestales WHERE unidad_negocio_id = '<un_prg_id>' AND activo = true;
+    esperado_bd: "≥1 PEP vigente de la UN PRG."
+
+  - n: 6
+    paso_original: 6
+    descripcion: Seleccionar el PEPS asociado a la UN
+    esperado: "El sistema me muestra el nombre y la dirección del inmueble"
+    calidad: null
+    legado: { resultado: Cumple, observacion: null, correccion: null }
+    r1: { resultado: PARCIAL, observacion: "Sitio/Lugar de cita no autocompletan: los 9 PEPs de PRG no tienen sociedad propia ni lugar predeterminado en BD (dato, no código)." }
+    accion: "Elegir el PEP listado en el combo PEP"
+    verificar_ui: "Campos Sitio/Inmueble y Lugar de cita se autocompletan con nombre y dirección reales"
+    verificar_bd: |
+      SELECT id_lugar_predeterminado FROM tc_partidas_presupuestales WHERE id = '<pep_id>';
+    esperado_bd: "Gap de dato conocido para los PEPs de PRG, no bug de código."
+
+  - n: 7
+    paso_original: 7
+    descripcion: Validar tipo de movimiento
+    esperado: "El sistema debe mostrar dos tipos de movimiento (Pedido y Servicio Interno)"
+    calidad: "Texto corrupto en el Excel original ('movi+E10:F10miento')."
+    decision_negocio:
+      fecha: "2026-10-11"
+      autorizo: "roberto.aguilar.cota@gmail.com (usuario / negocio)"
+      resolucion: >
+        H-002 (Tests/corridas/2026-10-10_R1_ESC-02/hallazgos.md): la UI real tiene 3
+        opciones reales de tc_tipos_movimiento_pedido (Orden de servicio / Pedido
+        facturable a cliente / Servicio interno), no 2. Se acepta como comportamiento
+        válido — no se agrega una opción literal "Pedido" al catálogo.
+      esperado_vigente: "El combo Tipo de movimiento muestra las 3 opciones reales vigentes de tc_tipos_movimiento_pedido."
+    legado: { resultado: "No cumple", observacion: 'Únicamente muestra "pedido"', correccion: Corregido }
+    r1: { resultado: "NO CUMPLE (reclasificado ACEPTADO)", observacion: 'H-002: UI real muestra 3 tipos (Orden de servicio / Pedido facturable a cliente / Servicio interno); ninguno se llama "Pedido" literal.' }
+    accion: "Abrir el combo Tipo de movimiento"
+    verificar_ui: "Listar las opciones visibles del combo"
+    verificar_bd: |
+      SELECT id, titulo FROM tc_tipos_movimiento_pedido WHERE tenant_id = '<tenant_id>';
+
+  - n: 8
+    paso_original: 8
+    descripcion: Seleccionar Tipo de movimiento Servicio Interno
+    esperado: "EL tipo Pedido se factura (validar posteriormente)"
+    calidad: "Paso selecciona Servicio Interno pero el esperado habla de 'Pedido'."
+    decision_negocio:
+      fecha: "2026-10-11"
+      autorizo: "roberto.aguilar.cota@gmail.com (usuario / negocio)"
+      resolucion: >
+        H-002: no existe un campo "Facturable" separado editable — el estado va
+        embebido en el texto de la opción elegida ("Servicio interno (no factura)").
+        Se acepta: no se agrega un campo Facturable aparte. Validar "Pedido se factura"
+        queda fuera de alcance de ESC-02 (otro tipo de movimiento, otro caso).
+      esperado_vigente: "Al elegir 'Servicio interno (no factura)' el pedido queda no facturable; no hay campo Facturable separado."
+    legado: { resultado: "No cumple", observacion: "Al no poder seleccionar el tipo de movimiento no sabemos si afecta en el procedimiento. Nos aparece que no es facturable, pero se puede cambiar.", correccion: Corregido }
+    r1: { resultado: "PARCIAL (reclasificado ACEPTADO)", observacion: 'H-002: "Facturable" va embebido en el texto de la opción elegida; no existe un campo separado editable.' }
+    accion: "Seleccionar la opción 'Servicio interno (no factura)'"
+    verificar_ui: "Estado de facturable/no facturable mostrado en el formulario"
+    verificar_bd: null
+
+  - n: 9
+    paso_original: 9
+    descripcion: Seleccionar Complejidad Foro Sol - 1 Día de Show
+    esperado: "Validar que el sistema sólo muestra las 6 complejidades del catálogo"
+    calidad: null
+    legado: { resultado: "No cumple", observacion: "únicamente muestra 3 opciones del foro sol, y dos son iguales.", correccion: Corregido }
+    r1: { resultado: CUMPLE, observacion: "6 complejidades reales confirmadas en combo, sin duplicados." }
+    accion: "Seleccionar 'Foro Sol, Festivales hasta 50,000 asistentes y Plazas Similares' como equivalente aprobado de Foro Sol"
+    verificar_ui: "Combo Tipo de complejidad muestra exactamente 6 opciones sin duplicados"
+    verificar_bd: |
+      SELECT id, titulo FROM tc_tipos_complejidad WHERE activo = true;
+    esperado_bd: "6 filas."
+
+  - n: 10
+    paso_original: 10
+    descripcion: Indicar 1 día de show en el campo Duración del Evento
+    esperado: ""
+    calidad: null
+    legado: { resultado: Cumple, observacion: null, correccion: null }
+    r1: { resultado: CUMPLE, observacion: 'Campo es compuesto (Tipo de duración + Días), no un único "Duración del Evento". Se usó Shows Sueltos + 1 día.' }
+    accion: "Tipo de duración = Shows Sueltos, Duración (días) = 1"
+    verificar_ui: "Ambos campos capturados sin error"
+    verificar_bd: null
+
+  - n: 11
+    paso_original: 11
+    descripcion: En el campo Permitir Cancelar, seleccionar NO
+    esperado: ""
+    calidad: null
+    legado: { resultado: Cumple, observacion: null, correccion: null }
+    r1: { resultado: CUMPLE, observacion: "Click real en checkbox confirmado." }
+    accion: "Click real (no form_input) en el checkbox 'Permitir cancelaciones' hasta dejarlo desmarcado"
+    verificar_ui: "Checkbox desmarcado"
+    verificar_bd: null
+
+  - n: 12
+    paso_original: 12
+    descripcion: Pulsar Aceptar
+    esperado: "El sistema genera un número consecutivo de pedido."
+    calidad: null
+    legado: { resultado: Cumple, observacion: null, correccion: null }
+    r1: { resultado: CUMPLE, observacion: "Precondición crítica VERIFICADA EN BD (pedido #199/#200): tipo_complejidad_id, tipo_duracion_id, duracion_dias=1 y permitir_cancelaciones=false guardados correctamente." }
+    accion: "Click en Aceptar del modal Registro de pedido"
+    verificar_ui: "Toast/confirmación con folio consecutivo"
+    verificar_bd: |
+      SELECT folio, tipo_complejidad_id, tipo_duracion_id, duracion_dias, permitir_cancelaciones
+      FROM te_pedidos WHERE titulo LIKE 'QA-{corrida}-ESC02%';
+    esperado_bd:
+      permitir_cancelaciones: false
+    precondicion_critica: true
+
+  - n: 13
+    paso_original: 13
+    descripcion: Tipo de personal
+    esperado: "Validar que muestra Staff y Operativo"
+    calidad: null
+    decision_negocio:
+      fecha: "2026-10-11"
+      autorizo: "roberto.aguilar.cota@gmail.com (usuario / negocio)"
+      resolucion: >
+        H-003 (hallazgos.md): tc_tipos_personal tiene 3 claves reales (freelance/interno/
+        staff) con descripciones "Personal freelance / eventual" / "Personal interno de
+        oficina" / "Personal de planta". No existe el texto literal "Staff"/"Operativo",
+        pero la clave `staff` ("Personal de planta") sí implementa el gating de negocio
+        real (solo visible si el pedido tiene complejidad). Se acepta la nomenclatura
+        real, no se renombra el catálogo.
+      esperado_vigente: "El combo Tipo de personal muestra 'Personal freelance / eventual', 'Personal interno de oficina' y 'Personal de planta' (este último es el equivalente funcional real de 'Staff')."
+    legado: { resultado: Cumple, observacion: null, correccion: null }
+    r1: { resultado: "CUMPLE (reclasificado ACEPTADO)", observacion: 'H-003: "Personal de planta" (clave=staff) SÍ es seleccionable y activa el gating real de negocio — verificado releyendo el código y reprobando en vivo.' }
+    accion: "Abrir modal 'Agregar detalle al pedido' y abrir el combo Tipo de personal"
+    verificar_ui: "Listar las opciones visibles"
+    verificar_bd: |
+      SELECT id, clave, descripcion FROM tc_tipos_personal WHERE tenant_id = '<tenant_id>';
+
+  - n: 14
+    paso_original: 14
+    descripcion: Seleccionar Staff como Tipo de Personal
+    esperado: ""
+    calidad: null
+    legado: { resultado: Cumple, observacion: null, correccion: null }
+    r1: { resultado: "NO CUMPLE (resuelto por H-005, ver nota)", observacion: "Con 'Personal de planta' (clave real staff) seleccionado, el combo de Producto quedaba VACÍO en el primer pase — causa raíz real: ningún puesto matricial de PRG tenía tarifa en tp_sueldos_matriciales (H-005, Migración 033, ya resuelto)." }
+    accion: "Elegir 'Personal de planta' en el combo Tipo de personal"
+    verificar_ui: "Opción queda seleccionada"
+    verificar_bd: null
+    nota: >
+      Este paso y los siguientes (15-26) no se re-ejecutaron formalmente como parte de
+      esta sesión de cierre de hallazgos (solo se verificó end-to-end que el combo
+      Producto ya no queda vacío — ver Tests/regresion/H-005_sueldos_matriciales_prg.md).
+      Pendiente una re-ejecución completa de los pasos 15-26 en una corrida nueva (R2)
+      para cerrar formalmente el escenario.
+
+  - n: 15
+    paso_original: 15
+    descripcion: "Producto: Asistente Operador PRG - IN"
+    esperado: "Validar que el catálogo mostrado es el de PRG"
+    calidad: null
+    legado: { resultado: "No cumple", observacion: "El producto asistente operador PRG-IN no aparece si tomamos el tipo de personal staff, pero si tomamos el tipo de personal operativo sí aparece la opción", correccion: "BASE DE DATOS" }
+    r1: { resultado: "NO EJECUTABLE (resuelto por H-005)", observacion: "Bloqueado en el primer pase; corregido — ver Tests/regresion/H-005_sueldos_matriciales_prg.md (prueba end-to-end con el pedido #200)." }
+    accion: "Buscar y seleccionar 'Asistente Operador PRG' en el combo Producto"
+    verificar_ui: "El producto aparece en el combo y queda seleccionado"
+    verificar_bd: |
+      SELECT p.id, p.titulo, p.id_puesto, p.vigente FROM tc_productos p WHERE p.titulo ILIKE '%Asistente Operador%PRG%';
+    pendiente_reejecucion: true
+
+  - n: 16
+    paso_original: 16
+    descripcion: Validar la jornada
+    esperado: "Debe mostrar 1 turno por 12 horas, que es el turno asociado al producto"
+    calidad: null
+    legado: { resultado: "No cumple", observacion: "En ninguna parte aparece los turnos y las horas.", correccion: Corregido }
+    r1: { resultado: PARCIAL, observacion: "La UI sí acepta fecha de cita y liberación sin error, pero el renglón nunca se persistía por H-005 (ya resuelto)." }
+    accion: "Observar el indicador de jornada/duración de turno tras elegir el producto"
+    verificar_ui: "Jornada mostrada = 1 turno / 12 horas"
+    verificar_bd: null
+    pendiente_reejecucion: true
+
+  - n: 17
+    paso_original: 17
+    descripcion: Seleccionar una fecha de cita y de liberación
+    esperado: ""
+    calidad: null
+    legado: { resultado: Cumple, observacion: null, correccion: null }
+    r1: { resultado: CUMPLE, observacion: null }
+    accion: "Capturar Fecha de cita y Fecha de liberación"
+    verificar_ui: "Campos capturados sin error de validación"
+    verificar_bd: null
+
+  - n: 18
+    paso_original: 18
+    descripcion: Presentación por producto
+    esperado: "Validar que nos se muestran presentaciones"
+    calidad: "Probable error de tecleo: 'nos' → 'no'. Se conserva el texto original (regla §1.6)."
+    legado: { resultado: Cumple, observacion: 'Asumo que en vez de "nos" hace referencia a no', correccion: null }
+    r1: { resultado: "NO EJECUTABLE (resuelto por H-005)", observacion: "No se pudo probar con un producto Staff real en el primer pase; pendiente re-confirmar con Staff real." }
+    accion: "Abrir el combo Presentación por producto"
+    verificar_ui: "Combo sin opciones reales (solo placeholder '-- sin presentación --')"
+    verificar_bd: null
+    pendiente_reejecucion: true
+
+  - n: 19
+    paso_original: 19
+    descripcion: Fase del evento
+    esperado: "Al ser Staff con complejidad y días de show debe mostrar No Aplica"
+    calidad: null
+    legado: { resultado: "No cumple", observacion: "En efecto no aplica, pero tanto en el escenario 1 y 2 aparecía así. Además se continuó con personal operativo y no de staff", correccion: "EN PROCESO" }
+    r1: { resultado: "NO EJECUTABLE (resuelto por H-005)", observacion: 'Con producto sin puesto el sistema SÍ valida claramente "Elegí un producto (define el puesto)" — no es falla silenciosa. Pendiente re-probar con Staff real.' }
+    accion: "Observar el combo Fase del evento tras elegir el producto Staff"
+    verificar_ui: "Auto-selección de 'No aplica' o estado del combo"
+    verificar_bd: null
+    pendiente_reejecucion: true
+
+  - n: 20
+    paso_original: 20
+    descripcion: Agregar Registro
+    esperado: "El sistema no lo permite, ya que al ser puestos de Staff, cada producto debe ir en un bloque nuevo"
+    calidad: null
+    legado: { resultado: "Sin ejecutar", observacion: null, correccion: null }
+    r1: { resultado: "NO EJECUTABLE (resuelto por H-005)", observacion: 'No se encontró control de "Bloque" independiente visible (solo "+ Agregar fecha al bloque" dentro del mismo renglón).' }
+    accion: "Click en 'Agregar Registro'"
+    verificar_ui: "Comportamiento de bloques para Staff"
+    verificar_bd: null
+    pendiente_reejecucion: true
+
+  - n: 21
+    paso_original: 21
+    descripcion: Seleccionar nuevo Bloque
+    esperado: ""
+    calidad: null
+    legado: { resultado: "Sin ejecutar", observacion: null, correccion: null }
+    r1: { resultado: "NO EJECUTABLE (resuelto por H-005)", observacion: "Sin producto Staff seleccionable en el primer pase no había presupuesto que leer." }
+    accion: "Buscar control de nuevo Bloque"
+    verificar_ui: "—"
+    verificar_bd: null
+    pendiente_reejecucion: true
+
+  - n: 22
+    paso_original: 22
+    descripcion: Agregar Registro
+    esperado: "Validar que el presupuesto día va ligado a la complejidad y los días de show"
+    calidad: null
+    legado: { resultado: "Sin ejecutar", observacion: null, correccion: null }
+    r1: { resultado: "NO EJECUTABLE (resuelto por H-005)", observacion: "El modal abría correctamente pero ninguna alta se completaba." }
+    accion: "Click en 'Agregar Registro'"
+    verificar_ui: "Presupuesto día calculado"
+    verificar_bd: |
+      SELECT id, puesto_id, producto_id, precio, costo_por_nomina FROM te_pedidos_detalle WHERE pedido_id = '<pedido_id>';
+    pendiente_reejecucion: true
+
+  - n: 23
+    paso_original: 23
+    descripcion: Agregar nuevo pedido detalle
+    esperado: ""
+    calidad: null
+    legado: { resultado: "Sin ejecutar", observacion: null, correccion: null }
+    r1: { resultado: "NO CUMPLE (resuelto por H-005)", observacion: 'Mismo bloqueo con "Asistente Aux A PRG" (confirmado vigente=true, UN=PRG, matricial=true en BD, pero sin tarifa matricial en el primer pase).' }
+    accion: "Click en '+ Agregar detalle'"
+    verificar_ui: "Se abre el modal nuevamente"
+    verificar_bd: null
+    pendiente_reejecucion: true
+
+  - n: 24
+    paso_original: 24
+    descripcion: "Seleccionar producto: Asistente Auxiliar A"
+    esperado: ""
+    calidad: null
+    legado: { resultado: "Sin ejecutar", observacion: null, correccion: null }
+    r1: { resultado: "NO EJECUTABLE (resuelto por H-005)", observacion: null }
+    accion: "Seleccionar 'Asistente Aux A PRG' en el combo Producto"
+    verificar_ui: "Producto seleccionado"
+    verificar_bd: null
+    pendiente_reejecucion: true
+
+  - n: 25
+    paso_original: 25
+    descripcion: Seleccionar nuevo Bloque
+    esperado: ""
+    calidad: null
+    legado: { resultado: "Sin ejecutar", observacion: null, correccion: null }
+    r1: { resultado: "NO EJECUTABLE (resuelto por H-005)", observacion: "VERIFICADO EN BD: te_pedidos_detalle con 0 filas para folio 199/200 en el primer pase. No había 2 bloques que comparar." }
+    accion: "Buscar control de nuevo Bloque"
+    verificar_ui: "—"
+    verificar_bd: null
+    pendiente_reejecucion: true
+
+  - n: 26
+    paso_original: 26
+    descripcion: Agregar Registro
+    esperado: "Validar que se ha creado el nuevo bloque con el producto y los montos"
+    calidad: null
+    legado: { resultado: "Sin ejecutar", observacion: null, correccion: null }
+    r1: { resultado: "NO EJECUTABLE (resuelto por H-005)", observacion: null }
+    accion: "Click en 'Agregar Registro'"
+    verificar_ui: "2 bloques con el mismo producto, montos y fechas propias"
+    verificar_bd: |
+      SELECT bloque_num, puesto_id, precio FROM te_pedidos_detalle WHERE pedido_id = '<pedido_id>';
+    esperado_bd: "2 bloques distintos con 1 producto cada uno."
+    pendiente_reejecucion: true
+    precondicion_critica: true

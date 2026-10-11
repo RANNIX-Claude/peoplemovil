@@ -1,0 +1,19 @@
+{
+  "corrida": "R1",
+  "escenario": "ESC-02",
+  "sesion": "S02",
+  "fecha": "2026-10-10",
+  "commit": "a5462f3c806ceed566256a39c8e14d48ac66ab53",
+  "commit_fecha": "2026-10-10T11:26:14-06:00",
+  "ultima_migracion_bd": "20261010161441",
+  "ambiente": {
+    "url": "https://peoplemovil00.netlify.app",
+    "tenant": "eventos",
+    "usuario": "admin.demo01",
+    "supabase_project_url": "https://ysyeidudlvdkqpckspcy.supabase.co"
+  },
+  "metodologia": "Docs/METODOLOGIA_QA.md",
+  "plan_pruebas": "Tests/Plan_Pruebas_Freelance.xlsx",
+  "estado_bd": "Copia no productiva de datos reales. Sin snapshot/branch adicional: create_branch de Supabase NO copia datos de producción (solo esquema+migraciones), por lo que un branch quedaría vacío e inútil para este escenario, que depende de catálogos y clientes reales (Ocesa, UN PRG, etc.). Se usa en su lugar: prefijo QA- en todo registro nuevo, título con QA-R1-ESC02, y este manifiesto como punto de referencia del estado antes de la corrida.",
+  "notas": "docs/METODOLOGIA_QA.md y tests/Plan_Pruebas_Freelance.xlsx no existían en el repo al iniciar esta sesión; el usuario los copió a Dev/Docs y Dev/Tests durante la sesión. Se crearon además .claude/agents/qa-tester.md, qa-analista.md, qa-corrector.md conforme a METODOLOGIA_QA.md §12 (no existían)."
+}
