@@ -503,6 +503,31 @@ export default function SitiosAsignacion() {
       }
     }
 
+    // Escenario 6 QA: tampoco debe traslaparse con detalles YA EXISTENTES del
+    // mismo pedido y mismo puesto (el legado real nunca validó esto -- aquí sí
+    // se valida, a propósito, como mejora sobre el legado). El trigger del
+    // servidor (tg_peddet_valida_empalme) es la defensa real; esto es solo
+    // feedback inmediato en el formulario.
+    const detallesExistentes = detalles.filter(d =>
+      d.puesto_id === nuevoDetalle.puesto_id &&
+      d.status_detalle !== 'cancelado' &&
+      d.id !== editandoDetalleId &&
+      d.fecha_cita
+    );
+    for (const f of filas) {
+      const ini = new Date(`${f.fecha_cita}T${f.hora_cita_inicio || '00:00'}:00`).getTime();
+      const fin = f.fecha_final_cita ? new Date(f.fecha_final_cita).getTime() : ini + 1000;
+      const conflicto = detallesExistentes.find(d => {
+        const dIni = new Date(`${d.fecha_cita}T${d.hora_cita_inicio || '00:00'}:00`).getTime();
+        const dFin = d.fecha_final_cita ? new Date(d.fecha_final_cita).getTime() : dIni + 1000;
+        return ini < dFin && dIni < fin;
+      });
+      if (conflicto) {
+        setMsgDetalle(`❌ Este detalle empalma en horario con el detalle ${conflicto.id} del mismo pedido y puesto.`);
+        return;
+      }
+    }
+
     if (editandoDetalleId) {
       const { error } = await supabase.from('te_pedidos_detalle').update(filas[0]).eq('id', editandoDetalleId);
       if (error) { setMsgDetalle('❌ ' + error.message); return; }
