@@ -34,7 +34,7 @@ export default function Preasignacion() {
 
   useEffect(() => {
     if (!supabaseReady) return;
-    supabase.from('te_pedidos_detalle').select('*, tc_puestos(titulo), tc_productos(titulo), te_pedidos(folio, titulo, sitio_id, fecha_evento)')
+    supabase.from('te_pedidos_detalle').select('*, tc_puestos(titulo, duracion_turno_horas), tc_productos(titulo), te_pedidos(folio, titulo, sitio_id, fecha_evento)')
       .in('status_detalle', ['borrador','liberado']).order('fecha_cita').limit(50)
       .then(({ data }) => setDetalles(data || []));
   }, []);
@@ -44,7 +44,7 @@ export default function Preasignacion() {
   // más recientes (p.ej. ya está "procesado" o "cancelado") y agregarlo a la lista.
   useEffect(() => {
     if (!supabaseReady || !detalleIdUrl) return;
-    supabase.from('te_pedidos_detalle').select('*, tc_puestos(titulo), tc_productos(titulo), te_pedidos(folio, titulo, sitio_id, fecha_evento)')
+    supabase.from('te_pedidos_detalle').select('*, tc_puestos(titulo, duracion_turno_horas), tc_productos(titulo), te_pedidos(folio, titulo, sitio_id, fecha_evento)')
       .eq('id', detalleIdUrl).maybeSingle()
       .then(({ data }) => {
         if (!data) return;
@@ -92,8 +92,22 @@ export default function Preasignacion() {
 
   const asignar = async () => {
     if (!empSel || !selDetalle) return;
-    const cita_i = selDetalle.te_pedidos?.fecha_evento ? new Date(selDetalle.te_pedidos.fecha_evento + 'T08:00:00Z') : new Date();
-    const cita_f = new Date(cita_i.getTime() + 8*3600000);
+    // Bug real encontrado en Escenario 5 (seriados): usaba siempre la fecha del
+    // PEDIDO (encabezado), no la del detalle -- dos días distintos del mismo
+    // bloque calculaban el mismo cita_inicio/cita_fin y se rechazaban entre sí
+    // por "traslape". Misma lógica de fallback que inscribirme_a_publicacion().
+    let cita_i, cita_f;
+    if (selDetalle.fecha_cita) {
+      const horas = selDetalle.tc_puestos?.duracion_turno_horas || 12;
+      cita_i = new Date(`${selDetalle.fecha_cita}T${selDetalle.hora_cita_inicio || '00:00:00'}`);
+      cita_f = selDetalle.hora_cita_fin
+        ? new Date(`${selDetalle.fecha_cita}T${selDetalle.hora_cita_fin}`)
+        : new Date(cita_i.getTime() + horas * 3600000);
+      if (cita_f <= cita_i) cita_f = new Date(cita_f.getTime() + 24 * 3600000);
+    } else {
+      cita_i = selDetalle.te_pedidos?.fecha_evento ? new Date(selDetalle.te_pedidos.fecha_evento + 'T08:00:00Z') : new Date();
+      cita_f = new Date(cita_i.getTime() + 8 * 3600000);
+    }
     const { error } = await supabase.from('te_reservaciones').insert({
       tenant_id: DEMO_TENANT_ID,
       pedido_id: selDetalle.pedido_id,

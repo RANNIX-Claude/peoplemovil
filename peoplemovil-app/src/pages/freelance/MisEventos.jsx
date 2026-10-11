@@ -67,6 +67,21 @@ export default function MisEventos() {
   const porConfirmar = futuros.filter(e => e.estado === 'preasignado');
   const confirmados = futuros.filter(e => ESTADOS_ASIGNADO.includes(e.estado));
 
+  // Agrupa "Por confirmar" por bloque (mismo pedido + bloque_num): el legado
+  // confirma un seriado completo con un solo clic desde el portal, aunque el
+  // sistema siga persistiendo una confirmación por día (Escenario 5, ver
+  // CLAUDE.md). Los que no tienen bloque_num se muestran sueltos, como antes.
+  const bloquesPorConfirmar = new Map();
+  const sueltosPorConfirmar = [];
+  for (const e of porConfirmar) {
+    if (e.bloque_num == null) { sueltosPorConfirmar.push(e); continue; }
+    const key = `${e.pedido_id}:${e.bloque_num}`;
+    if (!bloquesPorConfirmar.has(key)) bloquesPorConfirmar.set(key, []);
+    bloquesPorConfirmar.get(key).push(e);
+  }
+  const gruposPorConfirmar = Array.from(bloquesPorConfirmar.values())
+    .sort((a, b) => new Date(a[0].cita_inicio) - new Date(b[0].cita_inicio));
+
   const inscribirme = async o => {
     setEnviando(true);
     const { error } = await supabase.rpc('inscribirme_a_publicacion', { p_detalle: o.pedido_detalle_id });
@@ -82,6 +97,15 @@ export default function MisEventos() {
     setEnviando(false);
     if (error) { toast.error(error.message); return; }
     toast.success('Asistencia confirmada');
+    setSel(null); setAccion(null); cargarEventos();
+  };
+
+  const confirmarBloque = async grupo => {
+    setEnviando(true);
+    const { data, error } = await supabase.rpc('confirmar_mi_bloque', { p_pedido_detalle_id: grupo[0].pedido_detalle_id });
+    setEnviando(false);
+    if (error) { toast.error(error.message); return; }
+    toast.success(`Bloque confirmado (${data} día${data === 1 ? '' : 's'})`);
     setSel(null); setAccion(null); cargarEventos();
   };
 
@@ -125,7 +149,11 @@ export default function MisEventos() {
               <p style={{ fontSize: 13, color: 'var(--muted)' }}>No tenés eventos pendientes de confirmar.</p>
             )}
             <div style={{ display: 'grid', gap: 10, maxHeight: 240, overflowY: 'auto', paddingRight: 2 }}>
-              {porConfirmar.map(e => (
+              {gruposPorConfirmar.map(grupo => (
+                <BloqueCard key={`${grupo[0].pedido_id}:${grupo[0].bloque_num}`} grupo={grupo}
+                  onClick={() => { setSel(grupo); setAccion('confirmar-bloque'); }} />
+              ))}
+              {sueltosPorConfirmar.map(e => (
                 <EventoCard key={e.id} e={e} showUrgencia onClick={() => { setSel(e); setAccion('confirmar'); }} />
               ))}
             </div>
@@ -164,7 +192,8 @@ export default function MisEventos() {
         ))}
       </div>
 
-      <Modal open={!!sel} onClose={() => { setSel(null); setAccion(null); }} title={sel?.puesto || ''}
+      <Modal open={!!sel} onClose={() => { setSel(null); setAccion(null); }}
+        title={accion === 'confirmar-bloque' ? sel?.[0]?.puesto || '' : sel?.puesto || ''}
         footer={sel && (
           accion === 'oferta' ? (
             <>
@@ -178,6 +207,13 @@ export default function MisEventos() {
               <button className="btn ghost" onClick={() => { setSel(null); setAccion(null); }} disabled={enviando}>Cerrar</button>
               <button className="btn green" onClick={() => confirmar(sel)} disabled={enviando}>
                 {enviando ? 'Confirmando…' : 'Confirmar asistencia →'}
+              </button>
+            </>
+          ) : accion === 'confirmar-bloque' ? (
+            <>
+              <button className="btn ghost" onClick={() => { setSel(null); setAccion(null); }} disabled={enviando}>Cerrar</button>
+              <button className="btn green" onClick={() => confirmarBloque(sel)} disabled={enviando}>
+                {enviando ? 'Confirmando…' : `Confirmar bloque (${sel.length} días) →`}
               </button>
             </>
           ) : (
@@ -204,7 +240,19 @@ export default function MisEventos() {
             {sel.cierra_en && <div><div className="label">Cierra inscripciones</div><div>{new Date(sel.cierra_en).toLocaleString('es-MX')}</div></div>}
           </div>
         )}
-        {sel && accion !== 'oferta' && (
+        {sel && accion === 'confirmar-bloque' && (
+          <div style={{ display: 'grid', gap: 10, fontSize: 13 }}>
+            <div><div className="label">Evento</div><div>{sel[0].pedido_titulo} {sel[0].pedido_folio ? `· Folio ${sel[0].pedido_folio}` : ''}</div></div>
+            <div><div className="label">Puesto</div><div>{sel[0].puesto}</div></div>
+            <div><div className="label">Fecha</div><div>
+              {fmtFecha(sel[0].cita_inicio)} a {fmtFecha(sel[sel.length - 1].cita_inicio)} ({sel.length} días)
+            </div></div>
+            <div><div className="label">Lugar de cita</div><div>{sel[0].lugar_cita || sel[0].sitio}</div></div>
+            {sel[0].indicaciones_especiales && <div><div className="label">Indicaciones</div><div>{sel[0].indicaciones_especiales}</div></div>}
+            <div style={{ fontSize: 12, color: 'var(--muted)' }}>Este bloque agrupa {sel.length} días. Confirmar el bloque confirma los {sel.length} de una sola vez.</div>
+          </div>
+        )}
+        {sel && accion !== 'oferta' && accion !== 'confirmar-bloque' && (
           <div style={{ display: 'grid', gap: 10, fontSize: 13 }}>
             <div><div className="label">Evento</div><div>{sel.pedido_titulo} {sel.pedido_folio ? `· Folio ${sel.pedido_folio}` : ''}</div></div>
             <div><div className="label">Puesto</div><div>{sel.puesto}</div></div>
@@ -245,6 +293,28 @@ function EventoCard({ e, onClick, showUrgencia }) {
           <span style={{ fontSize: 11, fontWeight: 700, color: u.color }}>{u.label}</span>
         </div>
       )}
+    </div>
+  );
+}
+
+function BloqueCard({ grupo, onClick }) {
+  const u = urgencia(grupo[0].cita_inicio);
+  return (
+    <div className="card" style={{ margin: 0, cursor: 'pointer', borderLeft: `3px solid ${u.color}` }} onClick={onClick}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12 }}>
+        <div>
+          <div style={{ fontWeight: 800, fontSize: 14 }}>{grupo[0].puesto}</div>
+          <div style={{ fontSize: 12, color: 'var(--muted)' }}>📍 {grupo[0].lugar_cita || grupo[0].sitio}</div>
+          <div style={{ fontSize: 12, color: 'var(--accent)', marginTop: 6, fontWeight: 700 }}>
+            {fmtFecha(grupo[0].cita_inicio)} a {fmtFecha(grupo[grupo.length - 1].cita_inicio)}
+          </div>
+        </div>
+        <Badge estado="pendiente">BLOQUE · {grupo.length} días</Badge>
+      </div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 8 }}>
+        <span style={{ width: 7, height: 7, borderRadius: '50%', background: u.color, flexShrink: 0 }} />
+        <span style={{ fontSize: 11, fontWeight: 700, color: u.color }}>{u.label}</span>
+      </div>
     </div>
   );
 }

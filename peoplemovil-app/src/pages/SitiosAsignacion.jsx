@@ -235,7 +235,14 @@ export default function SitiosAsignacion() {
     if (matrizFilas.length === 0) return { fechas: [], grupos: [] };
     const fechasSet = new Set();
     const grupos = new Map();
-    for (const r of matrizFilas) {
+    // Un renglón cancelado no debe seguir ocupando columna en la Matriz de
+    // Puestos -- el bloque sigue existiendo con el resto de sus días, pero esa
+    // fecha puntual debe desaparecer de la matriz (confirmado contra el video
+    // legado del Escenario 5: cancelar un día del seriado quita su columna sin
+    // tocar los demás). La tabla "Detalle por línea" de abajo sí sigue
+    // mostrando el renglón cancelado -- esto solo afecta el pivot visual.
+    const filasActivas = matrizFilas.filter(r => r.status_detalle !== 'cancelado');
+    for (const r of filasActivas) {
       if (r.fecha_cita) fechasSet.add(r.fecha_cita);
       const key = `${r.bloque_num ?? '—'}|${r.producto_id ?? r.puesto_id ?? 'sin-producto'}`;
       if (!grupos.has(key)) {
