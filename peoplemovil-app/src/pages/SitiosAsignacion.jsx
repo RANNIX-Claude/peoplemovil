@@ -386,7 +386,14 @@ export default function SitiosAsignacion() {
     }
     if (!pu) return true; // Operativo: sin puesto asociado todavía -- no lo ocultamos (gap conocido)
     if (pu.matricial) return false; // los matriciales solo se ofrecen bajo Tipo=Staff
-    return !pedidoSel?.unidad_negocio_id || !pu.id_unidad_negocio || pu.id_unidad_negocio === pedidoSel.unidad_negocio_id;
+    // Ya no se exige que pu.id_unidad_negocio coincida con la UN del pedido: el
+    // catálogo real asigna una sola UN "dueña" por puesto (backfill 152/152,
+    // Migración 031), pero en el legado un mismo puesto (ej. Anfitrion, Control
+    // de Accesos) se pide con normalidad desde pedidos de otras UN -- confirmado
+    // en vivo con Escenario 4 (pedido UN=Seguridad incluyendo Anfitrion-IN y
+    // Control de Accesos-FE/MA, cuyos puestos tienen UN propia distinta). Filtrar
+    // por UN aquí ocultaba productos legítimos.
+    return true;
   });
 
   // Regla #3 (segunda mitad): si el puesto elegido tarifa por Fase de Evento
