@@ -38,7 +38,9 @@ function horasEntre(inicioISO, finISO) {
 function calcularFechaFinal(fechaCita, horaInicio, turnos, duracionTurnoHoras) {
   if (!fechaCita || !(Number(turnos) > 0)) return null;
   const horas = Number(duracionTurnoHoras || 8) * Number(turnos);
-  const inicio = new Date(`${fechaCita}T${horaInicio || '00:00'}:00`);
+  const horaNormalizada = (horaInicio || '00:00').slice(0, 5);
+  const inicio = new Date(`${fechaCita}T${horaNormalizada}:00`);
+  if (Number.isNaN(inicio.getTime())) return null;
   return new Date(inicio.getTime() + horas * 3600000).toISOString();
 }
 
@@ -568,7 +570,7 @@ export default function SitiosAsignacion() {
         setMsgDetalle('❌ La fecha final no puede ser anterior a la fecha de cita.'); return;
       }
       if (f.fecha_final_cita && f.fecha_cita) {
-        const inicio = new Date(`${f.fecha_cita}T${f.hora_cita_inicio || '00:00'}:00`);
+        const inicio = new Date(`${f.fecha_cita}T${(f.hora_cita_inicio || '00:00').slice(0, 5)}:00`);
         if (horasEntre(inicio.toISOString(), f.fecha_final_cita) < 4) {
           setMsgDetalle('❌ Debe haber mínimo 4 horas entre la fecha/hora de la cita y la fecha final.'); return;
         }
@@ -580,7 +582,7 @@ export default function SitiosAsignacion() {
       const intervalos = filas
         .filter(f => f.fecha_cita)
         .map(f => ({
-          ini: new Date(`${f.fecha_cita}T${f.hora_cita_inicio || '00:00'}:00`).getTime(),
+          ini: new Date(`${f.fecha_cita}T${(f.hora_cita_inicio || '00:00').slice(0, 5)}:00`).getTime(),
           fin: f.fecha_final_cita ? new Date(f.fecha_final_cita).getTime() : new Date(`${f.fecha_cita}T23:59:59`).getTime()
         }))
         .sort((a, b) => a.ini - b.ini);
@@ -603,10 +605,10 @@ export default function SitiosAsignacion() {
       d.fecha_cita
     );
     for (const f of filas) {
-      const ini = new Date(`${f.fecha_cita}T${f.hora_cita_inicio || '00:00'}:00`).getTime();
+      const ini = new Date(`${f.fecha_cita}T${(f.hora_cita_inicio || '00:00').slice(0, 5)}:00`).getTime();
       const fin = f.fecha_final_cita ? new Date(f.fecha_final_cita).getTime() : ini + 1000;
       const conflicto = detallesExistentes.find(d => {
-        const dIni = new Date(`${d.fecha_cita}T${d.hora_cita_inicio || '00:00'}:00`).getTime();
+        const dIni = new Date(`${d.fecha_cita}T${(d.hora_cita_inicio || '00:00').slice(0, 5)}:00`).getTime();
         const dFin = d.fecha_final_cita ? new Date(d.fecha_final_cita).getTime() : dIni + 1000;
         return ini < dFin && dIni < fin;
       });
@@ -622,15 +624,30 @@ export default function SitiosAsignacion() {
       // Se captura el detalle ORIGINAL antes del UPDATE -- "detalles" todavía
       // tiene la versión vieja en este punto, se refresca hasta cargarDetallePedido().
       const detalleOriginal = detalles.find(d => d.id === editandoDetalleId);
+      // Regla real: "Al cambiar de turnos o fecha de cita se manda una
+      // notificación al empleado del cambio" -- turnos, no solo fecha/hora.
       const cambioHorario = detalleOriginal && (
         detalleOriginal.fecha_cita !== filas[0].fecha_cita ||
         (detalleOriginal.hora_cita_inicio || null) !== (filas[0].hora_cita_inicio || null) ||
-        (detalleOriginal.hora_cita_fin || null) !== (filas[0].hora_cita_fin || null)
+        (detalleOriginal.hora_cita_fin || null) !== (filas[0].hora_cita_fin || null) ||
+        Number(detalleOriginal.turnos) !== Number(filas[0].turnos)
       );
 
       const { error } = await supabase.from('te_pedidos_detalle').update(filas[0]).eq('id', editandoDetalleId);
       if (error) { setMsgDetalle('❌ ' + error.message); return; }
       await logAccion('sitios_asignacion', 'EDITAR_DETALLE', `pedido ${pedidoSel.folio}: detalle ${editandoDetalleId}`);
+
+      // Regla real: "Al editar un detalle de un bloque toda la serie se
+      // actualiza la misma fecha de liberación, cantidad solicitada,
+      // presentación y completar con similares."
+      if (detalleOriginal?.bloque_num != null) {
+        await supabase.from('te_pedidos_detalle').update({
+          fecha_liberacion: filas[0].fecha_liberacion,
+          cantidad: filas[0].cantidad,
+          presentacion_id: filas[0].presentacion_id,
+          completar_productos_similares: filas[0].completar_productos_similares
+        }).eq('pedido_id', pedidoSel.id).eq('bloque_num', detalleOriginal.bloque_num).neq('id', editandoDetalleId);
+      }
 
       if (cambioHorario) {
         await avisarCambioHorario(detalleOriginal, filas[0]);
@@ -659,6 +676,11 @@ export default function SitiosAsignacion() {
   const abrirEditarDetalle = (pedidoDetalleId) => {
     const d = detalles.find(x => x.id === pedidoDetalleId);
     if (!d) return;
+    // Regla real: no se permite editar un detalle Cancelado o Procesado.
+    if (d.status_detalle === 'cancelado' || d.status_detalle === 'procesado') {
+      setMsg(`❌ No se puede editar un renglón en estado "${d.status_detalle}".`);
+      return;
+    }
     setNuevoDetalle({
       id_tipo_personal: d.id_tipo_personal || '',
       producto_id: d.producto_id || '',
@@ -705,10 +727,16 @@ export default function SitiosAsignacion() {
 
   const liberarDetalleLinea = async (pedidoDetalleId) => {
     if (!confirm('¿Liberar este renglón? Pasa a LIBERADO y se publica en el portal.')) return;
-    const { error } = await supabase.from('te_pedidos_detalle').update({ status_detalle: 'liberado' }).eq('id', pedidoDetalleId);
+    const d = detalles.find(x => x.id === pedidoDetalleId);
+    const payload = { status_detalle: 'liberado', publicado: true, publicado_en: new Date().toISOString() };
+    // Regla real: si el renglón pertenece a un bloque, liberar propaga a TODOS
+    // los detalles de ese bloque (mismo patrón que liberar_pedido() a nivel pedido).
+    let q = supabase.from('te_pedidos_detalle').update(payload).eq('status_detalle', 'borrador');
+    q = d?.bloque_num != null ? q.eq('pedido_id', pedidoSel.id).eq('bloque_num', d.bloque_num) : q.eq('id', pedidoDetalleId);
+    const { error } = await q;
     if (error) { setMsg('❌ ' + error.message); return; }
-    await logAccion('sitios_asignacion', 'LIBERAR_DETALLE', `detalle ${pedidoDetalleId}`);
-    setMsg('✓ Renglón liberado');
+    await logAccion('sitios_asignacion', 'LIBERAR_DETALLE', `detalle ${pedidoDetalleId}${d?.bloque_num != null ? ` (bloque ${d.bloque_num})` : ''}`);
+    setMsg(`✓ Renglón liberado${d?.bloque_num != null ? ' (bloque completo)' : ''}`);
     await cargarDetallePedido(pedidoSel);
   };
 
@@ -736,6 +764,152 @@ export default function SitiosAsignacion() {
   // movimiento solo permite "Pedido" -- no debe ofrecer "Servicio interno".
   const esSociedadLobo = !!sociedadesPropias.find(s => s.id === nuevoPedido.id_sociedad_propia)?.titulo?.includes('085-Lobo');
   const tiposMovimientoDisponibles = tiposMovimiento.filter(t => !esSociedadLobo || t.clave !== 'servicio_interno');
+
+  // Modal de Registro/edición de pedido (Escenario 1, pasos 1-10 del manual
+  // real; edición agregada para el Escenario 13 -- ver CLAUDE.md §7 Migración
+  // 038). Se arma como variable compartida porque se usa tanto en la VISTA
+  // LISTADO como en la VISTA FICHA (cada una hace su propio `return` antes,
+  // así que el JSX no se puede dejar solo al final del componente).
+  const pedidoModal = (
+    <Modal open={nuevoPedidoOpen} onClose={() => { setNuevoPedidoOpen(false); setEditandoPedidoId(null); }} title={editandoPedidoId ? 'Editar pedido' : 'Registro de pedido'} wide
+      footer={<><button className="btn ghost" onClick={() => { setNuevoPedidoOpen(false); setEditandoPedidoId(null); }}>Cancelar</button>
+        <button className="btn" onClick={altaPedido}>{editandoPedidoId ? 'Guardar cambios' : 'Aceptar'}</button></>}>
+      <form onSubmit={altaPedido} style={{ display: 'grid', gap: 14 }}>
+        <div><label className="label">Título del pedido *</label>
+          <input required className="field" value={nuevoPedido.titulo} onChange={e => setNuevoPedido({ ...nuevoPedido, titulo: e.target.value })} />
+        </div>
+
+        <div className="section-eyebrow" style={{ marginTop: 4 }}>Cliente y evento</div>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+          <div><label className="label">Cliente *</label>
+            <select required className="field" value={nuevoPedido.cliente_id}
+              onChange={e => setNuevoPedido({ ...nuevoPedido, cliente_id: e.target.value, contacto_id: '', evento_id: '' })}>
+              <option value="">— elegir —</option>
+              {clientes.map(c => <option key={c.id} value={c.id}>{c.razon_social}</option>)}
+            </select>
+          </div>
+          <div><label className="label">Contacto</label>
+            <select className="field" value={nuevoPedido.contacto_id} disabled={!nuevoPedido.cliente_id}
+              onChange={e => setNuevoPedido({ ...nuevoPedido, contacto_id: e.target.value })}>
+              <option value="">{nuevoPedido.cliente_id ? '— elegir —' : 'elegí cliente primero'}</option>
+              {contactos.map(c => <option key={c.id} value={c.id}>{c.nombre}{c.telefono ? ` · ${c.telefono}` : ''}</option>)}
+            </select>
+          </div>
+        </div>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr auto', gap: 12, alignItems: 'end' }}>
+          <div><label className="label">Evento</label>
+            <select className="field" value={nuevoPedido.evento_id} disabled={!nuevoPedido.cliente_id}
+              onChange={e => {
+                const ev = eventos.find(x => x.id === e.target.value);
+                setNuevoPedido(prev => ({ ...prev, evento_id: e.target.value, titulo: ev ? ev.titulo : prev.titulo }));
+              }}>
+              <option value="">{nuevoPedido.cliente_id ? '— elegir —' : 'elegí cliente primero'}</option>
+              {eventos.map(ev => <option key={ev.id} value={ev.id}>{ev.titulo}</option>)}
+            </select>
+          </div>
+          <div><label className="label">…o crear evento nuevo</label>
+            <input className="field" placeholder="Título del evento" value={nuevoEventoTitulo} disabled={!nuevoPedido.cliente_id}
+              onChange={e => setNuevoEventoTitulo(e.target.value)} />
+          </div>
+          <button type="button" className="btn ghost sm" disabled={!nuevoPedido.cliente_id || !nuevoEventoTitulo.trim()} onClick={crearEventoRapido}>+ Crear</button>
+        </div>
+        <div><label className="label">Fecha del evento *</label>
+          <input required type="date" className="field" value={nuevoPedido.fecha_evento} onChange={e => setNuevoPedido({ ...nuevoPedido, fecha_evento: e.target.value })} />
+        </div>
+
+        <div className="section-eyebrow" style={{ marginTop: 4 }}>Ubicación y presupuesto</div>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+          <div><label className="label">Unidad de negocio *</label>
+            <select required className="field" value={nuevoPedido.unidad_negocio_id}
+              onChange={e => setNuevoPedido({ ...nuevoPedido, unidad_negocio_id: e.target.value, partida_presupuestal_id: '' })}>
+              <option value="">— elegir —</option>
+              {unidadesNegocio.map(u => <option key={u.id} value={u.id}>{u.titulo}</option>)}
+            </select>
+          </div>
+          <div><label className="label">PEP *</label>
+            <select required className="field" value={nuevoPedido.partida_presupuestal_id} disabled={!nuevoPedido.unidad_negocio_id}
+              onChange={e => onPepChange(e.target.value)}>
+              <option value="">{nuevoPedido.unidad_negocio_id ? '— elegir —' : 'elegí unidad de negocio primero'}</option>
+              {peps.map(p => <option key={p.id} value={p.id}>{p.clave_pep} — {p.descripcion}</option>)}
+            </select>
+          </div>
+        </div>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+          <div><label className="label">Sitio / inmueble *</label>
+            <select required className="field" value={nuevoPedido.sitio_id} onChange={e => setNuevoPedido({ ...nuevoPedido, sitio_id: e.target.value })}>
+              <option value="">— elegir —</option>
+              {sitios.filter(s => s.activo).map(s => <option key={s.id} value={s.id}>{s.titulo}</option>)}
+            </select>
+            <p style={{ fontSize: 11, color: 'var(--muted)', marginTop: 4 }}>Se autocompleta al elegir el PEP si tiene inmueble predeterminado.</p>
+          </div>
+          <div><label className="label">Lugar de cita</label>
+            <select className="field" value={nuevoPedido.lugar_cita_id} onChange={e => setNuevoPedido({ ...nuevoPedido, lugar_cita_id: e.target.value })}>
+              <option value="">— elegir —</option>
+              {lugaresCita.map(l => <option key={l.id} value={l.id}>{l.titulo}</option>)}
+            </select>
+          </div>
+        </div>
+
+        <div className="section-eyebrow" style={{ marginTop: 4 }}>Facturación y tipo de movimiento</div>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+          <div><label className="label">Tipo de movimiento *</label>
+            <select required className="field" value={nuevoPedido.tipo_movimiento_id} onChange={e => setNuevoPedido({ ...nuevoPedido, tipo_movimiento_id: e.target.value })}>
+              <option value="">— elegir —</option>
+              {tiposMovimientoDisponibles.map(t => <option key={t.id} value={t.id}>{t.titulo}{t.se_factura ? ' (se factura)' : ''}</option>)}
+            </select>
+            {esSociedadLobo && <p style={{ fontSize: 11, color: 'var(--muted)', marginTop: 4 }}>Sociedad 085-Lobo: no se ofrece "Servicio interno".</p>}
+          </div>
+          <div><label className="label">Sociedad propia</label>
+            <select className="field" value={nuevoPedido.id_sociedad_propia} onChange={e => setNuevoPedido({ ...nuevoPedido, id_sociedad_propia: e.target.value })}>
+              <option value="">— elegir —</option>
+              {sociedadesPropias.map(s => <option key={s.id} value={s.id}>{s.titulo}</option>)}
+            </select>
+          </div>
+        </div>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, alignItems: 'end' }}>
+          <div><label className="label">Sociedad pagadora</label>
+            <select className="field" value={nuevoPedido.sociedad_pagadora_id} onChange={e => setNuevoPedido({ ...nuevoPedido, sociedad_pagadora_id: e.target.value })}>
+              <option value="">— elegir —</option>
+              {sociedadesPagadoras.map(s => <option key={s.id} value={s.id}>{s.titulo}</option>)}
+            </select>
+          </div>
+          <label style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
+            <input type="checkbox" checked={nuevoPedido.permitir_cancelaciones} onChange={e => setNuevoPedido({ ...nuevoPedido, permitir_cancelaciones: e.target.checked })} />
+            Permitir cancelaciones
+          </label>
+        </div>
+
+        <details>
+          <summary style={{ cursor: 'pointer', fontSize: 13, fontWeight: 700, color: 'var(--muted)' }}>Complejidad y responsable (opcional)</summary>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 12, marginTop: 10 }}>
+            <div><label className="label">Tipo de complejidad</label>
+              <select className="field" value={nuevoPedido.tipo_complejidad_id} onChange={e => setNuevoPedido({ ...nuevoPedido, tipo_complejidad_id: e.target.value })}>
+                <option value="">— ninguno —</option>
+                {tiposComplejidad.map(t => <option key={t.id} value={t.id}>{t.titulo}</option>)}
+              </select>
+            </div>
+            <div><label className="label">Tipo de duración</label>
+              <select className="field" value={nuevoPedido.tipo_duracion_id} onChange={e => setNuevoPedido({ ...nuevoPedido, tipo_duracion_id: e.target.value })}>
+                <option value="">— ninguno —</option>
+                {tiposDuracion.map(t => <option key={t.id} value={t.id}>{t.titulo}</option>)}
+              </select>
+            </div>
+            <div><label className="label">Duración (días)</label>
+              <input type="number" min="1" className="field" value={nuevoPedido.duracion_dias} onChange={e => setNuevoPedido({ ...nuevoPedido, duracion_dias: e.target.value })} />
+            </div>
+          </div>
+          <div style={{ marginTop: 10 }}><label className="label">Responsable</label>
+            <select className="field" value={nuevoPedido.responsable_id} onChange={e => setNuevoPedido({ ...nuevoPedido, responsable_id: e.target.value })}>
+              <option value="">— ninguno —</option>
+              {responsables.map(r => <option key={r.id} value={r.id}>{r.nombre}</option>)}
+            </select>
+          </div>
+        </details>
+
+        <p style={{ fontSize: 11, color: 'var(--muted)' }}>El plan del tenant se verifica en la base al insertar (trigger tg_ped_plan). El folio se asigna con <code>siguiente_folio()</code>.</p>
+      </form>
+    </Modal>
+  );
 
   // ============================================================
   // VISTA DETALLE: si hay pedidoSel, muestra la ficha
@@ -954,7 +1128,9 @@ export default function SitiosAsignacion() {
                           <td style={{ textAlign: 'right' }}>{d.cantidad}</td>
                           <td style={{ textAlign: 'right' }}>{d.cantidad_reservados_real || 0}</td>
                           <td style={{ textAlign: 'right' }}>{Math.round(pct * 100)}%</td>
-                          <td style={{ minWidth: 120 }}><Semaforo porcentaje={pct} /></td>
+                          <td style={{ minWidth: 120 }}>
+                            <Semaforo porcentaje={pct} liberado={d.status_detalle === 'liberado'} umbralAlto={0.85} umbralMedio={0.5} />
+                          </td>
                           <td>
                             <Badge estado={d.status_detalle === 'liberado' ? 'activo' : d.status_detalle === 'cancelado' ? 'vencido' : d.status_detalle === 'procesado' ? 'inactivo' : 'pendiente'}>
                               {d.status_detalle || 'borrador'}
@@ -1017,10 +1193,12 @@ export default function SitiosAsignacion() {
                 {!pedidoSel?.tipo_complejidad_id && <p style={{ fontSize: 11, color: 'var(--muted)', marginTop: 4 }}>"Staff" solo aparece si el pedido tiene complejidad.</p>}
               </div>
               <div><label className="label">Producto *</label>
-                <select required className="field" value={nuevoDetalle.producto_id} onChange={e => onProductoChange(e.target.value)}>
+                <select required disabled={!!editandoDetalleId} className="field" value={nuevoDetalle.producto_id} onChange={e => onProductoChange(e.target.value)}>
                   <option value="">— elegir —</option>
                   {productosFiltrados.map(p => <option key={p.id} value={p.id}>{p.titulo}{p.subcategoria ? ` - ${p.subcategoria}` : ''}</option>)}
                 </select>
+                {/* Regla real: no se puede cambiar el producto ni el bloque al editar un detalle. */}
+                {editandoDetalleId && <p style={{ fontSize: 11, color: 'var(--muted)', marginTop: 4 }}>El producto no se puede cambiar al editar.</p>}
               </div>
             </div>
             {puestoDetalle && (
@@ -1188,6 +1366,8 @@ export default function SitiosAsignacion() {
             </div>
           )}
         </Modal>
+
+        {pedidoModal}
       </div>
     );
   }
@@ -1252,146 +1432,7 @@ export default function SitiosAsignacion() {
         </table>
       </TablaWrap>
 
-      {/* Modal: Registro/edición de pedido (Escenario 1, pasos 1-10 del manual real;
-          edición agregada para el Escenario 13 -- ver CLAUDE.md §7 Migración 038) */}
-      <Modal open={nuevoPedidoOpen} onClose={() => { setNuevoPedidoOpen(false); setEditandoPedidoId(null); }} title={editandoPedidoId ? 'Editar pedido' : 'Registro de pedido'} wide
-        footer={<><button className="btn ghost" onClick={() => { setNuevoPedidoOpen(false); setEditandoPedidoId(null); }}>Cancelar</button>
-          <button className="btn" onClick={altaPedido}>{editandoPedidoId ? 'Guardar cambios' : 'Aceptar'}</button></>}>
-        <form onSubmit={altaPedido} style={{ display: 'grid', gap: 14 }}>
-          <div><label className="label">Título del pedido *</label>
-            <input required className="field" value={nuevoPedido.titulo} onChange={e => setNuevoPedido({ ...nuevoPedido, titulo: e.target.value })} />
-          </div>
-
-          <div className="section-eyebrow" style={{ marginTop: 4 }}>Cliente y evento</div>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-            <div><label className="label">Cliente *</label>
-              <select required className="field" value={nuevoPedido.cliente_id}
-                onChange={e => setNuevoPedido({ ...nuevoPedido, cliente_id: e.target.value, contacto_id: '', evento_id: '' })}>
-                <option value="">— elegir —</option>
-                {clientes.map(c => <option key={c.id} value={c.id}>{c.razon_social}</option>)}
-              </select>
-            </div>
-            <div><label className="label">Contacto</label>
-              <select className="field" value={nuevoPedido.contacto_id} disabled={!nuevoPedido.cliente_id}
-                onChange={e => setNuevoPedido({ ...nuevoPedido, contacto_id: e.target.value })}>
-                <option value="">{nuevoPedido.cliente_id ? '— elegir —' : 'elegí cliente primero'}</option>
-                {contactos.map(c => <option key={c.id} value={c.id}>{c.nombre}{c.telefono ? ` · ${c.telefono}` : ''}</option>)}
-              </select>
-            </div>
-          </div>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr auto', gap: 12, alignItems: 'end' }}>
-            <div><label className="label">Evento</label>
-              <select className="field" value={nuevoPedido.evento_id} disabled={!nuevoPedido.cliente_id}
-                onChange={e => {
-                  const ev = eventos.find(x => x.id === e.target.value);
-                  setNuevoPedido(prev => ({ ...prev, evento_id: e.target.value, titulo: ev ? ev.titulo : prev.titulo }));
-                }}>
-                <option value="">{nuevoPedido.cliente_id ? '— elegir —' : 'elegí cliente primero'}</option>
-                {eventos.map(ev => <option key={ev.id} value={ev.id}>{ev.titulo}</option>)}
-              </select>
-            </div>
-            <div><label className="label">…o crear evento nuevo</label>
-              <input className="field" placeholder="Título del evento" value={nuevoEventoTitulo} disabled={!nuevoPedido.cliente_id}
-                onChange={e => setNuevoEventoTitulo(e.target.value)} />
-            </div>
-            <button type="button" className="btn ghost sm" disabled={!nuevoPedido.cliente_id || !nuevoEventoTitulo.trim()} onClick={crearEventoRapido}>+ Crear</button>
-          </div>
-          <div><label className="label">Fecha del evento *</label>
-            <input required type="date" className="field" value={nuevoPedido.fecha_evento} onChange={e => setNuevoPedido({ ...nuevoPedido, fecha_evento: e.target.value })} />
-          </div>
-
-          <div className="section-eyebrow" style={{ marginTop: 4 }}>Ubicación y presupuesto</div>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-            <div><label className="label">Unidad de negocio *</label>
-              <select required className="field" value={nuevoPedido.unidad_negocio_id}
-                onChange={e => setNuevoPedido({ ...nuevoPedido, unidad_negocio_id: e.target.value, partida_presupuestal_id: '' })}>
-                <option value="">— elegir —</option>
-                {unidadesNegocio.map(u => <option key={u.id} value={u.id}>{u.titulo}</option>)}
-              </select>
-            </div>
-            <div><label className="label">PEP *</label>
-              <select required className="field" value={nuevoPedido.partida_presupuestal_id} disabled={!nuevoPedido.unidad_negocio_id}
-                onChange={e => onPepChange(e.target.value)}>
-                <option value="">{nuevoPedido.unidad_negocio_id ? '— elegir —' : 'elegí unidad de negocio primero'}</option>
-                {peps.map(p => <option key={p.id} value={p.id}>{p.clave_pep} — {p.descripcion}</option>)}
-              </select>
-            </div>
-          </div>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-            <div><label className="label">Sitio / inmueble *</label>
-              <select required className="field" value={nuevoPedido.sitio_id} onChange={e => setNuevoPedido({ ...nuevoPedido, sitio_id: e.target.value })}>
-                <option value="">— elegir —</option>
-                {sitios.filter(s => s.activo).map(s => <option key={s.id} value={s.id}>{s.titulo}</option>)}
-              </select>
-              <p style={{ fontSize: 11, color: 'var(--muted)', marginTop: 4 }}>Se autocompleta al elegir el PEP si tiene inmueble predeterminado.</p>
-            </div>
-            <div><label className="label">Lugar de cita</label>
-              <select className="field" value={nuevoPedido.lugar_cita_id} onChange={e => setNuevoPedido({ ...nuevoPedido, lugar_cita_id: e.target.value })}>
-                <option value="">— elegir —</option>
-                {lugaresCita.map(l => <option key={l.id} value={l.id}>{l.titulo}</option>)}
-              </select>
-            </div>
-          </div>
-
-          <div className="section-eyebrow" style={{ marginTop: 4 }}>Facturación y tipo de movimiento</div>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-            <div><label className="label">Tipo de movimiento *</label>
-              <select required className="field" value={nuevoPedido.tipo_movimiento_id} onChange={e => setNuevoPedido({ ...nuevoPedido, tipo_movimiento_id: e.target.value })}>
-                <option value="">— elegir —</option>
-                {tiposMovimientoDisponibles.map(t => <option key={t.id} value={t.id}>{t.titulo}{t.se_factura ? ' (se factura)' : ''}</option>)}
-              </select>
-              {esSociedadLobo && <p style={{ fontSize: 11, color: 'var(--muted)', marginTop: 4 }}>Sociedad 085-Lobo: no se ofrece "Servicio interno".</p>}
-            </div>
-            <div><label className="label">Sociedad propia</label>
-              <select className="field" value={nuevoPedido.id_sociedad_propia} onChange={e => setNuevoPedido({ ...nuevoPedido, id_sociedad_propia: e.target.value })}>
-                <option value="">— elegir —</option>
-                {sociedadesPropias.map(s => <option key={s.id} value={s.id}>{s.titulo}</option>)}
-              </select>
-            </div>
-          </div>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, alignItems: 'end' }}>
-            <div><label className="label">Sociedad pagadora</label>
-              <select className="field" value={nuevoPedido.sociedad_pagadora_id} onChange={e => setNuevoPedido({ ...nuevoPedido, sociedad_pagadora_id: e.target.value })}>
-                <option value="">— elegir —</option>
-                {sociedadesPagadoras.map(s => <option key={s.id} value={s.id}>{s.titulo}</option>)}
-              </select>
-            </div>
-            <label style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
-              <input type="checkbox" checked={nuevoPedido.permitir_cancelaciones} onChange={e => setNuevoPedido({ ...nuevoPedido, permitir_cancelaciones: e.target.checked })} />
-              Permitir cancelaciones
-            </label>
-          </div>
-
-          <details>
-            <summary style={{ cursor: 'pointer', fontSize: 13, fontWeight: 700, color: 'var(--muted)' }}>Complejidad y responsable (opcional)</summary>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 12, marginTop: 10 }}>
-              <div><label className="label">Tipo de complejidad</label>
-                <select className="field" value={nuevoPedido.tipo_complejidad_id} onChange={e => setNuevoPedido({ ...nuevoPedido, tipo_complejidad_id: e.target.value })}>
-                  <option value="">— ninguno —</option>
-                  {tiposComplejidad.map(t => <option key={t.id} value={t.id}>{t.titulo}</option>)}
-                </select>
-              </div>
-              <div><label className="label">Tipo de duración</label>
-                <select className="field" value={nuevoPedido.tipo_duracion_id} onChange={e => setNuevoPedido({ ...nuevoPedido, tipo_duracion_id: e.target.value })}>
-                  <option value="">— ninguno —</option>
-                  {tiposDuracion.map(t => <option key={t.id} value={t.id}>{t.titulo}</option>)}
-                </select>
-              </div>
-              <div><label className="label">Duración (días)</label>
-                <input type="number" min="1" className="field" value={nuevoPedido.duracion_dias} onChange={e => setNuevoPedido({ ...nuevoPedido, duracion_dias: e.target.value })} />
-              </div>
-            </div>
-            <div style={{ marginTop: 10 }}><label className="label">Responsable</label>
-              <select className="field" value={nuevoPedido.responsable_id} onChange={e => setNuevoPedido({ ...nuevoPedido, responsable_id: e.target.value })}>
-                <option value="">— ninguno —</option>
-                {responsables.map(r => <option key={r.id} value={r.id}>{r.nombre}</option>)}
-              </select>
-            </div>
-          </details>
-
-          <p style={{ fontSize: 11, color: 'var(--muted)' }}>El plan del tenant se verifica en la base al insertar (trigger tg_ped_plan). El folio se asigna con <code>siguiente_folio()</code>.</p>
-        </form>
-      </Modal>
+      {pedidoModal}
 
       <Modal open={nuevoSitioOpen} onClose={() => setNuevoSitioOpen(false)} title="Nuevo sitio"
         footer={<><button className="btn ghost" onClick={() => setNuevoSitioOpen(false)}>Cancelar</button>
