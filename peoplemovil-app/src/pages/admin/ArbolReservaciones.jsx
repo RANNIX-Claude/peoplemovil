@@ -21,11 +21,18 @@ export default function ArbolReservaciones() {
   useEffect(() => {
     if (!supabaseReady) return;
     (async () => {
-      const [{ data: p }, { data: d }, { data: s }] = await Promise.all([
-        supabase.from('te_pedidos').select('*').gte('fecha_evento', new Date(Date.now() - 30*86400000).toISOString().slice(0,10)).order('fecha_evento').limit(200),
-        supabase.from('te_pedidos_detalle').select('*, tc_puestos(titulo)').limit(500),
-        supabase.from('tc_sitios').select('*').eq('activo', true)
-      ]);
+      const { data: p } = await supabase.from('te_pedidos').select('*')
+        .gte('fecha_evento', new Date(Date.now() - 30*86400000).toISOString().slice(0,10))
+        .order('fecha_evento').limit(200);
+      const pedidoIds = (p || []).map(x => x.id);
+      // Bug real encontrado en Escenario 7 (QA): un `.limit(500)` plano sobre
+      // TODO te_pedidos_detalle (975 filas y creciendo) sin orden explícito
+      // podía dejar fuera renglones recién creados -- se acota a los pedidos
+      // ya traídos arriba (mismos ~200 pedidos, nunca más de 500 detalles reales).
+      const { data: d } = pedidoIds.length > 0
+        ? await supabase.from('te_pedidos_detalle').select('*, tc_puestos(titulo)').in('pedido_id', pedidoIds)
+        : { data: [] };
+      const { data: s } = await supabase.from('tc_sitios').select('*').eq('activo', true);
       setPedidos(p || []); setDetalles(d || []); setSitios(s || []);
     })();
   }, []);

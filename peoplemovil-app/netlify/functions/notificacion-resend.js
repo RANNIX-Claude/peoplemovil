@@ -22,6 +22,16 @@ const TEMPLATES = {
     subject: `Nueva asignación: ${v.evento}`,
     html: `<p>Hola ${v.nombre}, te asignamos como <b>${v.puesto}</b> el ${v.fecha} en ${v.sitio}. Cita: ${v.hora}. Confirmá desde la app.</p>`
   }),
+  // Escenario 13 QA (ver CLAUDE.md §7 Migración 038): aviso a los empleados ya
+  // CONFIRMADOS de un detalle cuando su fecha/hora de cita cambia -- el
+  // reagendo también reabre la ventana de cancelación de 72h en el servidor
+  // (valida_cancelacion), este correo es el aviso al freelance de ese cambio.
+  cambio_horario: (v) => ({
+    subject: `Cambio de horario: ${v.evento}`,
+    html: `<p>Hola ${v.nombre}, el horario de tu evento confirmado <b>${v.evento}</b> (${v.puesto}) cambió.</p>
+<p><b>Antes:</b> ${v.fechaAnterior}<br/><b>Ahora:</b> ${v.fechaNueva}</p>
+<p>Si ya no te queda, podés cancelar tu confirmación desde el portal.</p>`
+  }),
   recordatorio_checado: (v) => ({
     subject: `Recordatorio de checado — ${v.sitio}`,
     html: `<p>Hola ${v.nombre}, en 1 hora empieza tu turno en <b>${v.sitio}</b>. No olvides checar entrada.</p>`

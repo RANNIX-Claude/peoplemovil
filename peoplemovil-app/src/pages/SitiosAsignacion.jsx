@@ -23,7 +23,7 @@ const PEDIDO_VACIO = {
 const DETALLE_VACIO = {
   id_tipo_personal: '', producto_id: '', puesto_id: '', cantidad: 1, turnos: 1,
   fecha_cita: '', hora_cita_inicio: '', hora_cita_fin: '', fecha_final_cita: '',
-  fecha_liberacion: '', presentacion_id: '', fase_evento_id: '', uniforme_id: '',
+  fecha_liberacion: '', hora_liberacion: '', presentacion_id: '', fase_evento_id: '', uniforme_id: '',
   lugar_cita_id: '', lugar_otro: false, lugar_otro_descripcion: '',
   facturable: true, permitir_cancelar_confirmaciones: true,
   completar_productos_similares: false, indicaciones_especiales: ''
@@ -87,6 +87,7 @@ export default function SitiosAsignacion() {
   // --- modales ---
   const [nuevoPedidoOpen, setNuevoPedidoOpen] = useState(false);
   const [nuevoPedido, setNuevoPedido] = useState(PEDIDO_VACIO);
+  const [editandoPedidoId, setEditandoPedidoId] = useState(null); // null = alta, id = editando ese te_pedidos
   const [nuevoSitioOpen, setNuevoSitioOpen] = useState(false);
   const [nuevoSitio, setNuevoSitio] = useState({ titulo: '', tipo_sitio: 'sucursal', direccion: '' });
   const [nuevoEventoTitulo, setNuevoEventoTitulo] = useState('');
@@ -312,6 +313,26 @@ export default function SitiosAsignacion() {
     cargar();
   };
 
+  // abrirEditarPedido: edición de cabecera (hoy solo existía alta) -- gap real
+  // encontrado al automatizar el Escenario 13 QA (requiere editar
+  // permitir_cancelaciones de un pedido ya creado). Reusa el mismo modal/estado
+  // "nuevoPedido" del alta, igual que abrirEditarDetalle hace con nuevoDetalle.
+  const abrirEditarPedido = (p) => {
+    setNuevoPedido({
+      titulo: p.titulo || '', cliente_id: p.cliente_id || '', contacto_id: p.contacto_id || '', evento_id: p.evento_id || '',
+      unidad_negocio_id: p.unidad_negocio_id || '', partida_presupuestal_id: p.partida_presupuestal_id || '',
+      sitio_id: p.sitio_id || '', lugar_cita_id: p.lugar_cita_id || '',
+      id_sociedad_propia: p.id_sociedad_propia || '', sociedad_pagadora_id: p.sociedad_pagadora_id || '',
+      tipo_movimiento_id: p.tipo_movimiento_id || '', tipo_complejidad_id: p.tipo_complejidad_id || '',
+      tipo_duracion_id: p.tipo_duracion_id || '', duracion_dias: p.duracion_dias || '',
+      permitir_cancelaciones: p.permitir_cancelaciones ?? true,
+      fecha_evento: p.fecha_evento || '', responsable_id: p.responsable_id || ''
+    });
+    setEditandoPedidoId(p.id);
+    setMsg('');
+    setNuevoPedidoOpen(true);
+  };
+
   const altaPedido = async (e) => {
     e.preventDefault();
     if (!nuevoPedido.sitio_id) { setMsg('❌ Falta sitio (seleccioná un PEP que tenga inmueble predeterminado, o elegí sitio manualmente).'); return; }
@@ -320,11 +341,7 @@ export default function SitiosAsignacion() {
       setMsg('❌ Si elegís un tipo de complejidad, la duración (días de show) debe ser mayor a cero.');
       return;
     }
-    const { data: folio, error: errFolio } = await supabase.rpc('siguiente_folio', { p_tenant: DEMO_TENANT_ID, p_tipo: 'pedido' });
-    if (errFolio) { setMsg('❌ ' + errFolio.message); return; }
-    const payload = {
-      tenant_id: DEMO_TENANT_ID,
-      folio,
+    const payloadComun = {
       titulo: nuevoPedido.titulo,
       sitio_id: nuevoPedido.sitio_id,
       cliente_id: nuevoPedido.cliente_id || null,
@@ -341,9 +358,25 @@ export default function SitiosAsignacion() {
       duracion_dias: nuevoPedido.duracion_dias || null,
       permitir_cancelaciones: nuevoPedido.permitir_cancelaciones,
       fecha_evento: nuevoPedido.fecha_evento,
-      responsable_id: nuevoPedido.responsable_id || null,
-      status: 'borrador'
+      responsable_id: nuevoPedido.responsable_id || null
     };
+
+    if (editandoPedidoId) {
+      const { error } = await supabase.from('te_pedidos').update(payloadComun).eq('id', editandoPedidoId);
+      if (error) { setMsg('❌ ' + error.message); return; }
+      await logAccion('sitios_asignacion', 'EDITAR_PEDIDO', `pedido ${pedidoSel?.folio ?? editandoPedidoId}`);
+      setNuevoPedidoOpen(false);
+      setNuevoPedido(PEDIDO_VACIO);
+      setEditandoPedidoId(null);
+      setMsg('✓ Pedido actualizado');
+      if (pedidoSel?.id === editandoPedidoId) await cargarDetallePedido({ ...pedidoSel, ...payloadComun });
+      cargar();
+      return;
+    }
+
+    const { data: folio, error: errFolio } = await supabase.rpc('siguiente_folio', { p_tenant: DEMO_TENANT_ID, p_tipo: 'pedido' });
+    if (errFolio) { setMsg('❌ ' + errFolio.message); return; }
+    const payload = { ...payloadComun, tenant_id: DEMO_TENANT_ID, folio, status: 'borrador' };
     const { error } = await supabase.from('te_pedidos').insert(payload);
     if (error) { setMsg('❌ ' + error.message); return; }
     await logAccion('sitios_asignacion', 'INSERT', `pedido #${folio}: ${nuevoPedido.titulo}`);
@@ -415,6 +448,45 @@ export default function SitiosAsignacion() {
   // siguen mostrando para no ocultar el catálogo completo, ver CLAUDE.md).
   const uniformesFiltrados = uniformes.filter(u => !pedidoSel?.unidad_negocio_id || !u.id_unidad_negocio || u.id_unidad_negocio === pedidoSel.unidad_negocio_id);
 
+  // Escenario 13 QA, paso 19: "validar primero que se envía un correo
+  // electrónico a los confirmados avisando del cambio de horario". Reusa el
+  // template nuevo 'cambio_horario' de notificacion-resend.js (mismo patrón
+  // ya usado por CursoInduccion.jsx/FirmaContratos.jsx). No bloquea el guardado
+  // si falla -- es un aviso, no una validación de negocio.
+  const avisarCambioHorario = async (detalleOriginal, detalleNuevo) => {
+    try {
+      const { data: confirmados } = await supabase
+        .from('te_reservaciones')
+        .select('empleado_id, te_empleados(nombres, apellido_paterno, correo)')
+        .eq('pedido_detalle_id', editandoDetalleId)
+        .in('estado', ['confirmado_voluntario', 'confirmado_opcional', 'forzada']);
+      if (!confirmados || confirmados.length === 0) return;
+
+      const fmtFechaHora = (fecha, hora) => fecha ? `${fecha}${hora ? ' ' + hora : ''}` : '—';
+      const fechaAnterior = fmtFechaHora(detalleOriginal.fecha_cita, detalleOriginal.hora_cita_inicio);
+      const fechaNueva = fmtFechaHora(detalleNuevo.fecha_cita, detalleNuevo.hora_cita_inicio);
+      const puestoTitulo = puestos.find(p => p.id === detalleNuevo.puesto_id)?.titulo || '';
+
+      for (const c of confirmados) {
+        const e = c.te_empleados;
+        if (!e?.correo) continue;
+        await fetch('/.netlify/functions/notificacion-resend', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({
+            template: 'cambio_horario',
+            to: e.correo,
+            vars: {
+              nombre: `${e.nombres} ${e.apellido_paterno}`.trim(),
+              evento: pedidoSel?.titulo || '', puesto: puestoTitulo,
+              fechaAnterior, fechaNueva, tenant_id: DEMO_TENANT_ID
+            }
+          })
+        }).catch(() => {});
+      }
+    } catch { /* aviso best-effort, nunca debe tumbar el guardado del detalle */ }
+  };
+
   const guardarDetalle = async (e) => {
     e.preventDefault();
     setMsgDetalle('');
@@ -450,7 +522,12 @@ export default function SitiosAsignacion() {
       turnos: Number(nuevoDetalle.turnos) >= 0 ? Number(nuevoDetalle.turnos) : 1, // Regla #10: 0 turnos sí se permite
       hora_cita_inicio: nuevoDetalle.hora_cita_inicio || null,
       hora_cita_fin: nuevoDetalle.hora_cita_fin || null,
-      fecha_liberacion: nuevoDetalle.fecha_liberacion || null,
+      // Escenario 7 QA: el legado real captura fecha Y hora de liberación por
+      // separado (ver CLAUDE.md §7) -- sin la hora, cualquier liberación
+      // programada cae a medianoche, perdiendo la precisión que pide el guion.
+      fecha_liberacion: nuevoDetalle.fecha_liberacion
+        ? `${nuevoDetalle.fecha_liberacion}T${nuevoDetalle.hora_liberacion || '00:00'}:00`
+        : null,
       presentacion_id: nuevoDetalle.presentacion_id || null,
       fase_evento_id: nuevoDetalle.fase_evento_id || null,
       uniforme_id: nuevoDetalle.uniforme_id || null,
@@ -529,9 +606,24 @@ export default function SitiosAsignacion() {
     }
 
     if (editandoDetalleId) {
+      // Escenario 13 QA: si cambia fecha/hora de cita, avisar por correo a los
+      // empleados ya CONFIRMADOS de este renglón (ver CLAUDE.md §7 Migración 038).
+      // Se captura el detalle ORIGINAL antes del UPDATE -- "detalles" todavía
+      // tiene la versión vieja en este punto, se refresca hasta cargarDetallePedido().
+      const detalleOriginal = detalles.find(d => d.id === editandoDetalleId);
+      const cambioHorario = detalleOriginal && (
+        detalleOriginal.fecha_cita !== filas[0].fecha_cita ||
+        (detalleOriginal.hora_cita_inicio || null) !== (filas[0].hora_cita_inicio || null) ||
+        (detalleOriginal.hora_cita_fin || null) !== (filas[0].hora_cita_fin || null)
+      );
+
       const { error } = await supabase.from('te_pedidos_detalle').update(filas[0]).eq('id', editandoDetalleId);
       if (error) { setMsgDetalle('❌ ' + error.message); return; }
       await logAccion('sitios_asignacion', 'EDITAR_DETALLE', `pedido ${pedidoSel.folio}: detalle ${editandoDetalleId}`);
+
+      if (cambioHorario) {
+        await avisarCambioHorario(detalleOriginal, filas[0]);
+      }
     } else {
       let bloqueNum = null;
       if (filas.length > 1) {
@@ -567,6 +659,7 @@ export default function SitiosAsignacion() {
       hora_cita_fin: d.hora_cita_fin || '',
       fecha_final_cita: d.fecha_final_cita ? d.fecha_final_cita.slice(0, 10) : '',
       fecha_liberacion: d.fecha_liberacion ? d.fecha_liberacion.slice(0, 10) : '',
+      hora_liberacion: d.fecha_liberacion ? d.fecha_liberacion.slice(11, 16) : '',
       presentacion_id: d.presentacion_id || '',
       fase_evento_id: d.fase_evento_id || '',
       uniforme_id: d.uniforme_id || '',
@@ -601,7 +694,13 @@ export default function SitiosAsignacion() {
 
   const liberarDetalleLinea = async (pedidoDetalleId) => {
     if (!confirm('¿Liberar este renglón? Pasa a LIBERADO y se publica en el portal.')) return;
-    const { error } = await supabase.from('te_pedidos_detalle').update({ status_detalle: 'liberado' }).eq('id', pedidoDetalleId);
+    // Bug real encontrado en Escenario 10 (QA): a diferencia de liberar_pedido() (RPC, botón
+    // "Liberar pedido"), este liberar de un solo renglón nunca marcaba `publicado`, pese a que
+    // el propio texto de confirmación de arriba promete publicarlo -- v_publicaciones_para_freelance
+    // exige publicado=true, así que ningún freelance veía el cupo abierto de un detalle liberado así.
+    const { error } = await supabase.from('te_pedidos_detalle')
+      .update({ status_detalle: 'liberado', fecha_liberacion: new Date().toISOString(), publicado: true, publicado_en: new Date().toISOString() })
+      .eq('id', pedidoDetalleId);
     if (error) { setMsg('❌ ' + error.message); return; }
     await logAccion('sitios_asignacion', 'LIBERAR_DETALLE', `detalle ${pedidoDetalleId}`);
     setMsg('✓ Renglón liberado');
@@ -659,6 +758,7 @@ export default function SitiosAsignacion() {
             </div>
           </div>
           <div style={{ display: 'flex', gap: 6 }}>
+            <button className="btn ghost sm" onClick={() => abrirEditarPedido(pedidoSel)}>✎ Editar pedido</button>
             {pedidoSel.status !== 'liberado' && pedidoSel.status !== 'cancelado' && (
               <button className="btn green sm" onClick={liberarPedido}>🚀 Liberar pedido</button>
             )}
@@ -967,8 +1067,11 @@ export default function SitiosAsignacion() {
                 <p style={{ fontSize: 11, color: 'var(--muted)', marginTop: 4 }}>Último día que cubre este renglón (eventos multi-día).</p>
               </div>
               <div><label className="label">Fecha de liberación</label>
-                <input type="date" className="field" value={nuevoDetalle.fecha_liberacion} onChange={e => setNuevoDetalle({ ...nuevoDetalle, fecha_liberacion: e.target.value })} />
-                <p style={{ fontSize: 11, color: 'var(--muted)', marginTop: 4 }}>No puede ser posterior a la fecha de cita.</p>
+                <div style={{ display: 'flex', gap: 8 }}>
+                  <input type="date" className="field" value={nuevoDetalle.fecha_liberacion} onChange={e => setNuevoDetalle({ ...nuevoDetalle, fecha_liberacion: e.target.value })} />
+                  <input type="time" className="field" value={nuevoDetalle.hora_liberacion} onChange={e => setNuevoDetalle({ ...nuevoDetalle, hora_liberacion: e.target.value })} />
+                </div>
+                <p style={{ fontSize: 11, color: 'var(--muted)', marginTop: 4 }}>No puede ser posterior a la fecha de cita. Sin hora capturada, libera a las 00:00.</p>
               </div>
             </div>
             <div>
@@ -1105,7 +1208,7 @@ export default function SitiosAsignacion() {
       {/* Toolbar tipo Lobo */}
       <div className="card" style={{ padding: 12, marginBottom: 12 }}>
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center' }}>
-          <button className="btn" onClick={() => { setNuevoPedido(PEDIDO_VACIO); setMsg(''); setNuevoPedidoOpen(true); }}>+ Nuevo pedido</button>
+          <button className="btn" onClick={() => { setNuevoPedido(PEDIDO_VACIO); setEditandoPedidoId(null); setMsg(''); setNuevoPedidoOpen(true); }}>+ Nuevo pedido</button>
           <button className="btn ghost sm" onClick={() => setNuevoSitioOpen(true)}>+ Sitio</button>
           <button className="btn outline sm" onClick={exportarCSV}>📥 Exportar CSV</button>
           <span style={{ flex: 1 }} />
@@ -1144,10 +1247,11 @@ export default function SitiosAsignacion() {
         </table>
       </TablaWrap>
 
-      {/* Modal: Registro de pedido (Escenario 1, pasos 1-10 del manual real) */}
-      <Modal open={nuevoPedidoOpen} onClose={() => setNuevoPedidoOpen(false)} title="Registro de pedido" wide
-        footer={<><button className="btn ghost" onClick={() => setNuevoPedidoOpen(false)}>Cancelar</button>
-          <button className="btn" onClick={altaPedido}>Aceptar</button></>}>
+      {/* Modal: Registro/edición de pedido (Escenario 1, pasos 1-10 del manual real;
+          edición agregada para el Escenario 13 -- ver CLAUDE.md §7 Migración 038) */}
+      <Modal open={nuevoPedidoOpen} onClose={() => { setNuevoPedidoOpen(false); setEditandoPedidoId(null); }} title={editandoPedidoId ? 'Editar pedido' : 'Registro de pedido'} wide
+        footer={<><button className="btn ghost" onClick={() => { setNuevoPedidoOpen(false); setEditandoPedidoId(null); }}>Cancelar</button>
+          <button className="btn" onClick={altaPedido}>{editandoPedidoId ? 'Guardar cambios' : 'Aceptar'}</button></>}>
         <form onSubmit={altaPedido} style={{ display: 'grid', gap: 14 }}>
           <div><label className="label">Título del pedido *</label>
             <input required className="field" value={nuevoPedido.titulo} onChange={e => setNuevoPedido({ ...nuevoPedido, titulo: e.target.value })} />

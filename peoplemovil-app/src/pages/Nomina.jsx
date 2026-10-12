@@ -17,14 +17,18 @@ export default function Nomina() {
   const [seleccion, setSel] = useState(null);
   const [detalleModal, setDetalleModal] = useState(null);
   const [msg, setMsg] = useState('');
+  const [honorarios, setHonorarios] = useState([]);
 
   async function cargar() {
     if (!supabaseReady) return;
-    const [{ data: p }, { data: prec }] = await Promise.all([
+    const [{ data: p }, { data: prec }, { data: hon }] = await Promise.all([
       supabase.from('te_nominas_periodo').select('*').order('fecha_desde', { ascending: false }),
-      supabase.rpc('reporte_precauciones_nomina', { p_tenant: DEMO_TENANT_ID })
+      supabase.rpc('reporte_precauciones_nomina', { p_tenant: DEMO_TENANT_ID }),
+      supabase.from('v_reservaciones_sueldo_plaza').select('*')
+        .in('estado', ['confirmado_voluntario', 'confirmado_opcional', 'forzada', 'procesado'])
+        .order('cita_inicio', { ascending: false }).limit(100),
     ]);
-    setPeriodos(p || []); setPrec(prec || []);
+    setPeriodos(p || []); setPrec(prec || []); setHonorarios(hon || []);
   }
   useEffect(() => { cargar(); }, []);
 
@@ -73,6 +77,32 @@ export default function Nomina() {
               ))}
             </ul>}
       </div>
+
+      <h3 style={tituloConLinea}>🎯 Honorarios por reservación (plaza vigente)</h3>
+      <p style={{ fontSize: 12, color: 'var(--muted)', marginTop: -8, marginBottom: 12 }}>
+        Sueldo resuelto en vivo contra la plaza del empleado vigente en la fecha de la cita — no la plaza "principal" ni la más reciente.
+        $0.00 significa que no tiene ninguna plaza de ese puesto vigente para esa fecha.
+      </p>
+      <TablaWrap>
+        <table>
+          <thead>
+            <tr><th>Empleado</th><th>Puesto</th><th>Pedido</th><th>Fecha cita</th><th>Estado</th><th style={{ textAlign: 'right' }}>Sueldo calculado</th></tr>
+          </thead>
+          <tbody>
+            {honorarios.length === 0 && <tr><td colSpan="6" className="empty">Sin reservaciones confirmadas.</td></tr>}
+            {honorarios.map(h => (
+              <tr key={h.reservacion_id}>
+                <td>{h.empleado}</td>
+                <td>{h.puesto}</td>
+                <td className="mono">#{h.pedido_folio}</td>
+                <td style={{ fontSize: 12 }}>{new Date(h.cita_inicio).toLocaleString('es-MX')}</td>
+                <td style={{ fontSize: 12 }}>{h.estado}</td>
+                <td style={{ textAlign: 'right', fontWeight: 800, color: h.sueldo_calculado ? 'var(--accent2)' : 'var(--red)' }}>{fmt(h.sueldo_calculado)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </TablaWrap>
 
       <h3 style={tituloConLinea}>💰 Periodos de nómina</h3>
       <TablaWrap>

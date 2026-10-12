@@ -213,6 +213,11 @@ export default function ExpedienteEmpleado() {
   const [benModalOpen, setBenModalOpen] = useState(false);
   const [nuevoBen, setNuevoBen] = useState({ tipo_beneficio_id: '', fecha_inicio: '', monto: '', observaciones: '' });
 
+  const [plazaModalOpen, setPlazaModalOpen] = useState(false);
+  const [nuevaPlaza, setNuevaPlaza] = useState({ puesto_id: '', fecha_inicio: '', fecha_fin: '', sueldo: '' });
+  const [plazaEditando, setPlazaEditando] = useState(null); // fila de tr_empleado_plaza en edición (fechas/sueldo)
+  const [plazaEditForm, setPlazaEditForm] = useState({ fecha_inicio: '', fecha_fin: '', sueldo: '' });
+
   async function cargar() {
     if (!supabaseReady || !id) return;
     setCargando(true);
@@ -577,6 +582,41 @@ export default function ExpedienteEmpleado() {
     if (error) { setMsg('Error: ' + error.message); return; }
     await logAccion('expediente_empleado', 'UPDATE', `beneficio ${bid} dado de baja`);
     cargar();
+  }
+
+  // Plazas: vigencia por fecha + sueldo propio (Escenario 8, Migración 038).
+  // Si el puesto ya tiene una plaza abierta (fecha_fin NULL), el trigger
+  // tg_ep_autocierra la cierra sola el día previo a esta -- no hay que
+  // calcularlo a mano desde el frontend.
+  async function agregarPlaza(e) {
+    e.preventDefault();
+    if (!nuevaPlaza.puesto_id) { setMsg('Elegí un puesto.'); return; }
+    const { error } = await supabase.from('tr_empleado_plaza').insert({
+      tenant_id: empleado.tenant_id, empleado_id: id, puesto_id: nuevaPlaza.puesto_id,
+      fecha_inicio: nuevaPlaza.fecha_inicio || new Date().toISOString().slice(0, 10),
+      fecha_fin: nuevaPlaza.fecha_fin || null,
+      sueldo: nuevaPlaza.sueldo !== '' ? Number(nuevaPlaza.sueldo) : null,
+    });
+    if (error) { setMsg('Rechazado por la base: ' + error.message); return; }
+    await logAccion('expediente_empleado', 'INSERT', `plaza puesto ${nuevaPlaza.puesto_id} agregada`);
+    setNuevaPlaza({ puesto_id: '', fecha_inicio: '', fecha_fin: '', sueldo: '' });
+    setPlazaModalOpen(false); setMsg('Plaza agregada'); cargar();
+  }
+
+  function abrirEditarPlaza(p) {
+    setPlazaEditando(p);
+    setPlazaEditForm({ fecha_inicio: p.fecha_inicio || '', fecha_fin: p.fecha_fin || '', sueldo: p.sueldo != null ? String(p.sueldo) : '' });
+  }
+  async function guardarEdicionPlaza(e) {
+    e.preventDefault();
+    const { error } = await supabase.from('tr_empleado_plaza').update({
+      fecha_inicio: plazaEditForm.fecha_inicio,
+      fecha_fin: plazaEditForm.fecha_fin || null,
+      sueldo: plazaEditForm.sueldo !== '' ? Number(plazaEditForm.sueldo) : null,
+    }).eq('id', plazaEditando.id);
+    if (error) { setMsg('Rechazado por la base: ' + error.message); return; }
+    await logAccion('expediente_empleado', 'UPDATE', `plaza ${plazaEditando.id} -> fecha_inicio=${plazaEditForm.fecha_inicio}`);
+    setPlazaEditando(null); setMsg('Plaza actualizada'); cargar();
   }
 
   if (cargando) return <div style={{ padding: 40, color: 'var(--muted)' }}>Cargando expediente…</div>;
@@ -1057,21 +1097,29 @@ export default function ExpedienteEmpleado() {
       )}
 
       {tab === 'plazas' && (
-        <TablaWrap>
-          <table>
-            <thead><tr><th>Puesto</th><th>Puntualidad</th><th>Estado</th></tr></thead>
-            <tbody>
-              {plazas.length === 0 && <tr><td colSpan="3" className="empty">Sin plazas adicionales registradas.</td></tr>}
-              {plazas.map(p => (
-                <tr key={p.id}>
-                  <td>{p.puesto?.titulo || '—'}</td>
-                  <td style={{ maxWidth: 220 }}>{p.porcentaje_puntualidad != null ? <Semaforo porcentaje={p.porcentaje_puntualidad} /> : '—'}</td>
-                  <td><Badge estado={p.activo ? 'activo' : 'inactivo'}>{p.activo ? 'ACTIVA' : 'INACTIVA'}</Badge></td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </TablaWrap>
+        <>
+          <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 10 }}>
+            <button className="btn sm" onClick={() => setPlazaModalOpen(true)}>+ Agregar plaza</button>
+          </div>
+          <TablaWrap>
+            <table>
+              <thead><tr><th>Puesto</th><th>Vigencia</th><th style={{ textAlign: 'right' }}>Sueldo</th><th>Puntualidad</th><th>Estado</th><th></th></tr></thead>
+              <tbody>
+                {plazas.length === 0 && <tr><td colSpan="6" className="empty">Sin plazas registradas.</td></tr>}
+                {plazas.map(p => (
+                  <tr key={p.id}>
+                    <td>{p.puesto?.titulo || '—'}</td>
+                    <td style={{ fontSize: 12 }}>{fmtFecha(p.fecha_inicio) || '—'} → {p.fecha_fin ? fmtFecha(p.fecha_fin) : 'vigente'}</td>
+                    <td style={{ textAlign: 'right' }} className="mono">{p.sueldo != null ? '$' + Number(p.sueldo).toLocaleString('es-MX') : '—'}</td>
+                    <td style={{ maxWidth: 220 }}>{p.porcentaje_puntualidad != null ? <Semaforo porcentaje={p.porcentaje_puntualidad} /> : '—'}</td>
+                    <td><Badge estado={p.activo ? 'activo' : 'inactivo'}>{p.activo ? 'ACTIVA' : 'INACTIVA'}</Badge></td>
+                    <td style={{ textAlign: 'right' }}><button className="btn ghost sm" onClick={() => abrirEditarPlaza(p)}>✎ Editar</button></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </TablaWrap>
+        </>
       )}
 
       {tab === 'asistencia' && (
@@ -1252,6 +1300,46 @@ export default function ExpedienteEmpleado() {
             <div><label className="label">Monto (opcional)</label><input type="number" min="0" step="0.01" className="field" value={nuevoBen.monto} onChange={e => setNuevoBen({ ...nuevoBen, monto: e.target.value })} /></div>
           </div>
           <div><label className="label">Observaciones (opcional)</label><input className="field" value={nuevoBen.observaciones} onChange={e => setNuevoBen({ ...nuevoBen, observaciones: e.target.value })} /></div>
+        </form>
+      </Modal>
+
+      {/* Modal: agregar plaza */}
+      <Modal open={plazaModalOpen} onClose={() => setPlazaModalOpen(false)} title="Agregar plaza"
+        footer={<><button className="btn ghost" onClick={() => setPlazaModalOpen(false)}>Cancelar</button>
+                <button className="btn" onClick={agregarPlaza}>Guardar</button></>}>
+        <form onSubmit={agregarPlaza} style={{ display: 'grid', gap: 12 }}>
+          <div>
+            <label className="label">Puesto</label>
+            <select className="field" value={nuevaPlaza.puesto_id} onChange={e => setNuevaPlaza({ ...nuevaPlaza, puesto_id: e.target.value })}>
+              <option value="">Elegí un puesto…</option>
+              {catPuestos.map(p => <option key={p.id} value={p.id}>{p.titulo}</option>)}
+            </select>
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+            <div><label className="label">Fecha inicio</label><input type="date" className="field" value={nuevaPlaza.fecha_inicio} onChange={e => setNuevaPlaza({ ...nuevaPlaza, fecha_inicio: e.target.value })} /></div>
+            <div><label className="label">Fecha fin (opcional)</label><input type="date" className="field" value={nuevaPlaza.fecha_fin} onChange={e => setNuevaPlaza({ ...nuevaPlaza, fecha_fin: e.target.value })} /></div>
+          </div>
+          <div>
+            <label className="label">Sueldo (opcional — vacío = default del puesto)</label>
+            <input type="number" min="0" step="0.01" className="field" value={nuevaPlaza.sueldo} onChange={e => setNuevaPlaza({ ...nuevaPlaza, sueldo: e.target.value })} />
+          </div>
+          <p style={{ fontSize: 12, color: 'var(--muted)' }}>Si este puesto ya tiene una plaza vigente sin fecha de fin, se cierra automáticamente el día previo a esta.</p>
+        </form>
+      </Modal>
+
+      {/* Modal: editar vigencia/sueldo de una plaza existente */}
+      <Modal open={!!plazaEditando} onClose={() => setPlazaEditando(null)} title={`Editar plaza — ${plazaEditando?.puesto?.titulo || ''}`}
+        footer={<><button className="btn ghost" onClick={() => setPlazaEditando(null)}>Cancelar</button>
+                <button className="btn" onClick={guardarEdicionPlaza}>Guardar</button></>}>
+        <form onSubmit={guardarEdicionPlaza} style={{ display: 'grid', gap: 12 }}>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+            <div><label className="label">Fecha inicio</label><input type="date" className="field" value={plazaEditForm.fecha_inicio} onChange={e => setPlazaEditForm({ ...plazaEditForm, fecha_inicio: e.target.value })} /></div>
+            <div><label className="label">Fecha fin (opcional)</label><input type="date" className="field" value={plazaEditForm.fecha_fin} onChange={e => setPlazaEditForm({ ...plazaEditForm, fecha_fin: e.target.value })} /></div>
+          </div>
+          <div>
+            <label className="label">Sueldo</label>
+            <input type="number" min="0" step="0.01" className="field" value={plazaEditForm.sueldo} onChange={e => setPlazaEditForm({ ...plazaEditForm, sueldo: e.target.value })} />
+          </div>
         </form>
       </Modal>
 
