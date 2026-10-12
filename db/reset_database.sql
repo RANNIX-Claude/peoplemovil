@@ -7481,3 +7481,38 @@ CREATE TRIGGER tg_peddet_valida_fechas
   ON te_pedidos_detalle FOR EACH ROW EXECUTE FUNCTION tg_pedido_detalle_valida_fechas();
 
 -- ============================================================================
+-- Escenario 10 de la matriz de pruebas QA manual, "Cancelación de preasignación
+-- forzada por no confirmación" (aplicada a la base real como migración
+-- `038_fix_cancelacion_automatica_preasignados_estado`, ver CLAUDE.md §7).
+--
+-- Bug real confirmado (no supuesto): cancelacion_automatica_preasignados()
+-- filtraba estado='confirmado_opcional', valor de estado_reservacion_enum que
+-- ningún código del sistema asigna jamás -- "Confirmación Preasignada"
+-- (Preasignacion.jsx) inserta literalmente estado='preasignado', y
+-- confirmar_mi_reservacion() solo transiciona preasignado->confirmado_voluntario.
+-- En la práctica la función nunca cancelaba ninguna reservación real. Se
+-- corrige el filtro a 'preasignado', conservando la exclusión Producción/PRG
+-- de la Migración 022.
+-- ============================================================================
+CREATE OR REPLACE FUNCTION cancelacion_automatica_preasignados()
+RETURNS int AS $$
+DECLARE n int := 0; p tp_parametros_globales;
+BEGIN
+  FOR p IN SELECT * FROM tp_parametros_globales LOOP
+    WITH cancelaciones AS (
+      UPDATE te_reservaciones r SET estado='cancelado', regla_aplicada='PRC_CancelacionAutomaticaPreasignados'
+      WHERE r.tenant_id=p.tenant_id AND r.estado='preasignado'
+        AND (r.cita_inicio - now()) < (p.horas_lookahead_autocancel||' hours')::interval
+        AND (now() - r.creado_en) > (p.horas_gracia_confirmacion||' hours')::interval
+        AND NOT EXISTS (
+          SELECT 1 FROM tc_puestos pu
+          JOIN tc_unidades_negocio un ON un.id = pu.id_unidad_negocio
+          WHERE pu.id = r.puesto_id AND un.titulo IN ('Produccion','Producción','PRG')
+        )
+      RETURNING r.id
+    ) SELECT n + count(*) INTO n FROM cancelaciones;
+  END LOOP;
+  RETURN n;
+END $$ LANGUAGE plpgsql;
+
+-- ============================================================================

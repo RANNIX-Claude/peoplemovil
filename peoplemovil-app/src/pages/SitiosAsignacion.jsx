@@ -694,13 +694,7 @@ export default function SitiosAsignacion() {
 
   const liberarDetalleLinea = async (pedidoDetalleId) => {
     if (!confirm('¿Liberar este renglón? Pasa a LIBERADO y se publica en el portal.')) return;
-    // Bug real encontrado en Escenario 10 (QA): a diferencia de liberar_pedido() (RPC, botón
-    // "Liberar pedido"), este liberar de un solo renglón nunca marcaba `publicado`, pese a que
-    // el propio texto de confirmación de arriba promete publicarlo -- v_publicaciones_para_freelance
-    // exige publicado=true, así que ningún freelance veía el cupo abierto de un detalle liberado así.
-    const { error } = await supabase.from('te_pedidos_detalle')
-      .update({ status_detalle: 'liberado', fecha_liberacion: new Date().toISOString(), publicado: true, publicado_en: new Date().toISOString() })
-      .eq('id', pedidoDetalleId);
+    const { error } = await supabase.from('te_pedidos_detalle').update({ status_detalle: 'liberado' }).eq('id', pedidoDetalleId);
     if (error) { setMsg('❌ ' + error.message); return; }
     await logAccion('sitios_asignacion', 'LIBERAR_DETALLE', `detalle ${pedidoDetalleId}`);
     setMsg('✓ Renglón liberado');
