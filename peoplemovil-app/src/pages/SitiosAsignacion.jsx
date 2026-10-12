@@ -9,6 +9,7 @@ import Semaforo from '../components/Semaforo.jsx';
 import { tituloConLinea } from '../components/ui/CardHeader.jsx';
 import { supabase, supabaseReady, DEMO_TENANT_ID } from '../lib/supabase.js';
 import { useModuleAudit, logAccion } from '../lib/audit.js';
+import { useAdminAuth } from '../lib/AdminAuthContext.jsx';
 
 const fmt = n => Number(n || 0).toLocaleString('es-MX', { maximumFractionDigits: 0 });
 
@@ -46,6 +47,16 @@ function calcularFechaFinal(fechaCita, horaInicio, turnos, duracionTurnoHoras) {
 export default function SitiosAsignacion() {
   useModuleAudit('sitios_asignacion');
   const nav = useNavigate();
+  // Bug real de aislamiento multi-tenant (2026-10-12, hallado en Escenario 8):
+  // este módulo mandaba tenant_id: DEMO_TENANT_ID (constante, tenant "eventos")
+  // en TODOS los inserts, sin importar el tenant real de la sesión -- un admin
+  // de un tenant demo multi-vertical (construcción/seguridad privada/BTL) no
+  // podía crear pedidos (RLS lo rechazaba porque DEMO_TENANT_ID != su propio
+  // current_tenant_id()). Se usa el tenant resuelto en el servidor
+  // (AdminAuthContext.tenantId, vía current_tenant_id() -- Migración 025) con
+  // DEMO_TENANT_ID solo como fallback para el modo demo sin sesión real (§8).
+  const { tenantId: miTenantId } = useAdminAuth();
+  const TENANT_ID = miTenantId || DEMO_TENANT_ID;
 
   // --- listado ---
   const [pedidos, setPedidos] = useState([]);
@@ -200,7 +211,7 @@ export default function SitiosAsignacion() {
   const crearEventoRapido = async () => {
     if (!nuevoEventoTitulo.trim() || !nuevoPedido.cliente_id) return;
     const { data, error } = await supabase.from('tc_eventos')
-      .insert({ tenant_id: DEMO_TENANT_ID, cliente_id: nuevoPedido.cliente_id, titulo: nuevoEventoTitulo.trim() })
+      .insert({ tenant_id: TENANT_ID, cliente_id: nuevoPedido.cliente_id, titulo: nuevoEventoTitulo.trim() })
       .select('id, titulo').single();
     if (error) { setMsg('❌ ' + error.message); return; }
     setEventos(prev => [...prev, data]);
@@ -374,9 +385,9 @@ export default function SitiosAsignacion() {
       return;
     }
 
-    const { data: folio, error: errFolio } = await supabase.rpc('siguiente_folio', { p_tenant: DEMO_TENANT_ID, p_tipo: 'pedido' });
+    const { data: folio, error: errFolio } = await supabase.rpc('siguiente_folio', { p_tenant: TENANT_ID, p_tipo: 'pedido' });
     if (errFolio) { setMsg('❌ ' + errFolio.message); return; }
-    const payload = { ...payloadComun, tenant_id: DEMO_TENANT_ID, folio, status: 'borrador' };
+    const payload = { ...payloadComun, tenant_id: TENANT_ID, folio, status: 'borrador' };
     const { error } = await supabase.from('te_pedidos').insert(payload);
     if (error) { setMsg('❌ ' + error.message); return; }
     await logAccion('sitios_asignacion', 'INSERT', `pedido #${folio}: ${nuevoPedido.titulo}`);
@@ -388,7 +399,7 @@ export default function SitiosAsignacion() {
 
   const altaSitio = async (e) => {
     e.preventDefault();
-    const { error } = await supabase.from('tc_sitios').insert({ ...nuevoSitio, tenant_id: DEMO_TENANT_ID });
+    const { error } = await supabase.from('tc_sitios').insert({ ...nuevoSitio, tenant_id: TENANT_ID });
     if (error) { setMsg('❌ ' + error.message); return; }
     setNuevoSitioOpen(false);
     setNuevoSitio({ titulo: '', tipo_sitio: 'sucursal', direccion: '' });
@@ -479,7 +490,7 @@ export default function SitiosAsignacion() {
             vars: {
               nombre: `${e.nombres} ${e.apellido_paterno}`.trim(),
               evento: pedidoSel?.titulo || '', puesto: puestoTitulo,
-              fechaAnterior, fechaNueva, tenant_id: DEMO_TENANT_ID
+              fechaAnterior, fechaNueva, tenant_id: TENANT_ID
             }
           })
         }).catch(() => {});
@@ -629,7 +640,7 @@ export default function SitiosAsignacion() {
       if (filas.length > 1) {
         bloqueNum = (detalles.reduce((max, d) => Math.max(max, d.bloque_num || 0), 0)) + 1;
       }
-      const payloadFinal = filas.map(f => ({ ...f, tenant_id: DEMO_TENANT_ID, pedido_id: pedidoSel.id, bloque_num: bloqueNum }));
+      const payloadFinal = filas.map(f => ({ ...f, tenant_id: TENANT_ID, pedido_id: pedidoSel.id, bloque_num: bloqueNum }));
       const { error } = await supabase.from('te_pedidos_detalle').insert(payloadFinal);
       if (error) { setMsgDetalle('❌ ' + error.message); return; }
       await logAccion('sitios_asignacion', 'INSERT_DETALLE', `pedido ${pedidoSel.folio}: +${payloadFinal.length} renglón(es)${bloqueNum ? ` (bloque ${bloqueNum})` : ''}`);
