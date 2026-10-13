@@ -21,6 +21,7 @@ import FunnelReclutamiento from './pages/admin/FunnelReclutamiento.jsx';
 import DataWarehouse from './pages/admin/DataWarehouse.jsx';
 import Suscripcion from './pages/admin/Suscripcion.jsx';
 import CatalogosAdmin from './pages/admin/CatalogosAdmin.jsx';
+import ListaNegraAdmin from './pages/admin/ListaNegraAdmin.jsx';
 import UsuariosRoles from './pages/admin/UsuariosRoles.jsx';
 import ArbolReservaciones from './pages/admin/ArbolReservaciones.jsx';
 import Preasignacion from './pages/admin/Preasignacion.jsx';
@@ -75,6 +76,7 @@ export default function App() {
           <Route path="alta-masiva" element={<AltaMasivaEmpleados />} />
           <Route path="facturacion" element={<Facturacion />} />
           <Route path="catalogos" element={<CatalogosAdmin />} />
+          <Route path="lista-negra" element={<ListaNegraAdmin />} />
           <Route path="usuarios" element={<UsuariosRoles />} />
           <Route path="config" element={<Configuracion />} />
           <Route path="pricing" element={<Pricing />} />

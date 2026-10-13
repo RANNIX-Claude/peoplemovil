@@ -32,6 +32,7 @@ const SECCIONES = [
   ]},
   { titulo: 'Administración', items: [
     { path: '/admin/catalogos',     label: 'Catálogos (HU 9.01)', icono: '📚', requiere: 'catalogos.ver' },
+    { path: '/admin/lista-negra',   label: 'Lista negra', icono: '🚫', requiere: 'lista_negra.ver' },
     { path: '/admin/usuarios',      label: 'Usuarios y roles (HU 9.03)', icono: '🔐', requiere: 'usuarios.ver' },
     { path: '/admin/config',        label: 'Configuración', icono: '⚙️', requiere: null },
     { path: '/admin/suscripcion',   label: 'Mi suscripción', icono: '💳', requiere: null },
