@@ -12,7 +12,6 @@ import SitiosAsignacion from './pages/SitiosAsignacion.jsx';
 import Checador from './pages/Checador.jsx';
 import Nomina from './pages/Nomina.jsx';
 import Extras from './pages/admin/Extras.jsx';
-import AsignacionFolios from './pages/admin/AsignacionFolios.jsx';
 import Pricing from './pages/Pricing.jsx';
 import Configuracion from './pages/Configuracion.jsx';
 import Utilerias from './pages/Utilerias.jsx';
@@ -24,10 +23,8 @@ import DataWarehouse from './pages/admin/DataWarehouse.jsx';
 import Suscripcion from './pages/admin/Suscripcion.jsx';
 import CatalogosAdmin from './pages/admin/CatalogosAdmin.jsx';
 import ListaNegraAdmin from './pages/admin/ListaNegraAdmin.jsx';
-import ContactosAdmin from './pages/admin/ContactosAdmin.jsx';
 import UsuariosRoles from './pages/admin/UsuariosRoles.jsx';
 import ArbolReservaciones from './pages/admin/ArbolReservaciones.jsx';
-import ConsultaReservaciones from './pages/admin/ConsultaReservaciones.jsx';
 import Preasignacion from './pages/admin/Preasignacion.jsx';
 import ConfirmacionAsistencia from './pages/admin/ConfirmacionAsistencia.jsx';
 import CalendarioEntrevistas from './pages/admin/CalendarioEntrevistas.jsx';
@@ -67,13 +64,11 @@ export default function App() {
           <Route path="personal/:id" element={<ExpedienteEmpleado />} />
           <Route path="sitios" element={<SitiosAsignacion />} />
           <Route path="arbol" element={<ArbolReservaciones />} />
-          <Route path="consulta-reservaciones" element={<ConsultaReservaciones />} />
           <Route path="preasignacion" element={<Preasignacion />} />
           <Route path="asistencia" element={<ConfirmacionAsistencia />} />
           <Route path="checador" element={<Checador />} />
           <Route path="nomina" element={<Nomina />} />
           <Route path="extras" element={<Extras />} />
-          <Route path="asignacion-folios" element={<AsignacionFolios />} />
           <Route path="requisiciones" element={<Requisiciones />} />
           <Route path="funnel" element={<FunnelReclutamiento />} />
           <Route path="calendario-entrevistas" element={<CalendarioEntrevistas />} />
@@ -84,7 +79,6 @@ export default function App() {
           <Route path="facturacion" element={<Facturacion />} />
           <Route path="catalogos" element={<CatalogosAdmin />} />
           <Route path="lista-negra" element={<ListaNegraAdmin />} />
-          <Route path="contactos" element={<ContactosAdmin />} />
           <Route path="usuarios" element={<UsuariosRoles />} />
           <Route path="config" element={<Configuracion />} />
           <Route path="pricing" element={<Pricing />} />
