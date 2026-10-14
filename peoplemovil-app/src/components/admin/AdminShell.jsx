@@ -31,6 +31,7 @@ const SECCIONES = [
     { path: '/admin/alta-masiva',             label: 'Alta masiva empleados', icono: '📥', requiere: 'empleados.crear' }
   ]},
   { titulo: 'Analítica', items: [
+    { path: '/admin/people-analytics', label: 'People Analytics', icono: '🧭', requiere: 'reportes.ver' },
     { path: '/admin/dw',            label: 'Data Warehouse', icono: '📈', requiere: 'reportes.ver' }
   ]},
   { titulo: 'Administración', items: [
@@ -52,7 +53,7 @@ const SECCIONES = [
 // Etiqueta de build: AAMMDD-HHMM del momento en que se hizo este deploy.
 // Se actualiza a mano en cada release para poder confirmar a simple vista
 // qué versión quedó realmente publicada (pedido del usuario 2026-10-08).
-const BUILD_TAG = '261008-0710';
+const BUILD_TAG = '261014-1726';
 
 export default function AdminShell() {
   const [openMobile, setOpenMobile] = useState(false);

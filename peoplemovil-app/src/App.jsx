@@ -20,6 +20,7 @@ import Requisiciones from './pages/admin/Requisiciones.jsx';
 import Facturacion from './pages/admin/Facturacion.jsx';
 import FunnelReclutamiento from './pages/admin/FunnelReclutamiento.jsx';
 import DataWarehouse from './pages/admin/DataWarehouse.jsx';
+import PeopleAnalytics from './pages/admin/PeopleAnalytics.jsx';
 import Suscripcion from './pages/admin/Suscripcion.jsx';
 import CatalogosAdmin from './pages/admin/CatalogosAdmin.jsx';
 import ListaNegraAdmin from './pages/admin/ListaNegraAdmin.jsx';
@@ -83,6 +84,7 @@ export default function App() {
           <Route path="config" element={<Configuracion />} />
           <Route path="pricing" element={<Pricing />} />
           <Route path="dw" element={<DataWarehouse />} />
+          <Route path="people-analytics" element={<PeopleAnalytics />} />
           <Route path="suscripcion" element={<Suscripcion />} />
           <Route path="utilerias" element={<Utilerias />} />
           <Route path="bitacora" element={<Bitacora />} />

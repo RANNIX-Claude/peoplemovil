@@ -53,7 +53,30 @@ export default function Configuracion() {
                 ['horas_gracia_confirmacion',  'Gracia para confirmar (h)'],
                 ['retencion_registros_dias',   'Retención de registros (días)'],
                 ['certeza_inicial_default',    'Certeza inicial default (0-1)'],
-                ['aviso_privacidad_version',   'Versión del aviso de privacidad']
+                ['aviso_privacidad_version',   'Versión del aviso de privacidad'],
+              ].map(([k, l]) => (
+                <div key={k}>
+                  <label className="label">{l}</label>
+                  <input className="field" value={params[k] ?? ''} onChange={e => setParams({ ...params, [k]: e.target.value })} />
+                </div>
+              ))}
+            </div>
+
+            <h4 style={{ margin: '20px 0 4px', fontSize: 13 }}>🎯 Score de riesgo de rotación (People Analytics, Migración 061)</h4>
+            <p style={{ fontSize: 11, color: 'var(--muted)', margin: '0 0 10px' }}>
+              Pesos (deberían sumar ~1.0) y topes de los 5 factores del score heurístico -- no es un modelo de
+              Machine Learning entrenado, ver <a href="/admin/people-analytics">People Analytics → Predicción de Rotación</a>.
+            </p>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 14 }}>
+              {[
+                ['peso_riesgo_antiguedad',        'Peso: antigüedad'],
+                ['peso_riesgo_ausentismo',        'Peso: ausentismo'],
+                ['peso_riesgo_desempeno',         'Peso: desempeño'],
+                ['peso_riesgo_capacitacion',      'Peso: capacitación'],
+                ['peso_riesgo_compensacion',      'Peso: compensación relativa'],
+                ['tope_antiguedad_riesgo_anios',   'Tope antigüedad (años, 0 riesgo)'],
+                ['tope_ausentismo_riesgo_dias',    'Tope ausentismo (días, riesgo máx.)'],
+                ['tope_capacitacion_riesgo_horas', 'Tope capacitación (horas, 0 riesgo)'],
               ].map(([k, l]) => (
                 <div key={k}>
                   <label className="label">{l}</label>

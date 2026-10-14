@@ -159,10 +159,11 @@ export default function DataWarehouse() {
           </div>
         </div>
         <p style={{ fontSize: 11, color: 'var(--muted)', marginTop: 12 }}>
-          Margen por puesto usa <code>tc_puestos.pago_default</code> como costo aproximado -- el
-          tabulador real (<code>tp_sueldos_matriciales</code>) todavía no está cableado a ningún
-          cálculo (pendiente conocido, ver CLAUDE.md §11), así que el costo puede salir en $0 para
-          puestos que solo se tarifan por la matriz.
+          Margen por puesto usa el costo real del tabulador matricial (<code>tp_sueldos_matriciales</code> vía
+          <code> calcular_importe_matricial_reservacion()</code>, Migración 060) cuando el puesto/complejidad/duración
+          tiene una fila vigente; si no, cae a <code>tc_puestos.pago_default × turnos</code> como aproximación.
+          Ambigüedad conocida sin resolver (ver CLAUDE.md §11): el prorrateo de "Tarifa por Semana"/"Tarifa por Mes" en
+          <code> tp_duraciones_evento</code>.
         </p>
       </div>
     </div>

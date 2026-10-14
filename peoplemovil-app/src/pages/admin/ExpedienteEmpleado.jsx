@@ -19,6 +19,7 @@ const TABS = [
   { k: 'personal', label: '🪪 Domicilio y datos personales' },
   { k: 'documentos', label: '📄 Documentos' },
   { k: 'vacaciones', label: '🏖️ Vacaciones' },
+  { k: 'permisos', label: '🩺 Permisos/Incapacidades' },
   { k: 'capacitacion', label: '🎓 Capacitación' },
   { k: 'evaluaciones', label: '⭐ Evaluaciones' },
   { k: 'beneficios', label: '❤️ Beneficios' },
@@ -123,6 +124,19 @@ function ArchivoLink({ path, label = 'Ver ↗' }) {
 }
 
 const CAP_TIPOS = { interna: 'activo', externa: 'pendiente', certificacion: 'proceso' };
+const PERM_TIPO_LABEL = {
+  incapacidad_enfermedad_general: 'Incapacidad — Enfermedad general',
+  incapacidad_maternidad: 'Incapacidad — Maternidad',
+  incapacidad_riesgo_trabajo: 'Incapacidad — Riesgo de trabajo',
+  permiso_con_goce: 'Permiso con goce de sueldo',
+  permiso_sin_goce: 'Permiso sin goce de sueldo',
+  otro: 'Otro',
+};
+const PERM_TIPO_BADGE = {
+  incapacidad_enfermedad_general: 'vencido', incapacidad_maternidad: 'proceso',
+  incapacidad_riesgo_trabajo: 'vencido', permiso_con_goce: 'activo',
+  permiso_sin_goce: 'pendiente', otro: 'inactivo',
+};
 
 // Modal de edición genérico: recibe la definición de una "sección" (título +
 // lista de campos) y los valores actuales del empleado, y delega el guardado
@@ -175,6 +189,7 @@ export default function ExpedienteEmpleado() {
   const [nomina, setNomina] = useState([]);
   const [movimientos, setMovimientos] = useState([]);
   const [vacaciones, setVacaciones] = useState([]);
+  const [permisos, setPermisos] = useState([]);
   const [capacitaciones, setCapacitaciones] = useState([]);
   const [evaluaciones, setEvaluaciones] = useState([]);
   const [tiposBeneficio, setTiposBeneficio] = useState([]);
@@ -203,6 +218,9 @@ export default function ExpedienteEmpleado() {
   const [vacModalOpen, setVacModalOpen] = useState(false);
   const [nuevoVac, setNuevoVac] = useState({ anio_laboral: '', fecha_inicio: '', fecha_fin: '', dias: '', prima_vacacional: '', observaciones: '' });
 
+  const [permModalOpen, setPermModalOpen] = useState(false);
+  const [nuevoPerm, setNuevoPerm] = useState({ tipo: 'incapacidad_enfermedad_general', fecha_inicio: '', fecha_fin: '', dias: '', goce_sueldo: true, folio_imss: '', observaciones: '' });
+
   const [capModalOpen, setCapModalOpen] = useState(false);
   const [nuevoCap, setNuevoCap] = useState({ titulo: '', institucion: '', tipo: 'interna', horas: '', fecha_inicio: '', fecha_fin: '', vigencia_hasta: '', observaciones: '' });
   const [archivoCap, setArchivoCap] = useState(null);
@@ -230,6 +248,7 @@ export default function ExpedienteEmpleado() {
       { data: nom },
       { data: mov },
       { data: vac },
+      { data: perm },
       { data: cap },
       { data: evalu },
       { data: tben },
@@ -252,6 +271,7 @@ export default function ExpedienteEmpleado() {
       supabase.from('te_nomina_detalle').select('*, periodo:te_nominas_periodo(fecha_desde, fecha_hasta, ciclo_pago, cerrada)').eq('empleado_id', id).order('creado_en', { ascending: false }),
       supabase.from('tl_movimientos_empleado_det').select('*').eq('empleado_id', id).order('fecha_efectiva', { ascending: false }).limit(50),
       supabase.from('te_vacaciones_periodos').select('*').eq('empleado_id', id).order('fecha_inicio', { ascending: false }),
+      supabase.from('te_permisos_empleado').select('*').eq('empleado_id', id).order('fecha_inicio', { ascending: false }),
       supabase.from('te_capacitaciones_empleado').select('*').eq('empleado_id', id).order('fecha_inicio', { ascending: false }),
       supabase.from('te_evaluaciones_empleado').select('*, evaluador:te_usuarios(nombre, apellido_paterno)').eq('empleado_id', id).order('fecha_evaluacion', { ascending: false }),
       supabase.from('tc_tipos_beneficio').select('*').eq('activo', true).order('titulo'),
@@ -271,6 +291,7 @@ export default function ExpedienteEmpleado() {
     setNomina(nom || []);
     setMovimientos(mov || []);
     setVacaciones(vac || []);
+    setPermisos(perm || []);
     setCapacitaciones(cap || []);
     setEvaluaciones(evalu || []);
     setTiposBeneficio(tben || []);
@@ -523,6 +544,32 @@ export default function ExpedienteEmpleado() {
     const { error } = await supabase.from('te_vacaciones_periodos').update({ estado: 'cancelada' }).eq('id', vid);
     if (error) { setMsg('Error: ' + error.message); return; }
     await logAccion('expediente_empleado', 'UPDATE', `período de vacaciones ${vid} cancelado`);
+    cargar();
+  }
+
+  async function agregarPermiso(e) {
+    e.preventDefault();
+    if (!nuevoPerm.tipo || !nuevoPerm.fecha_inicio || !nuevoPerm.fecha_fin || !nuevoPerm.dias) {
+      setMsg('Completá tipo, fechas y días.'); return;
+    }
+    const { error } = await supabase.from('te_permisos_empleado').insert({
+      tenant_id: DEMO_TENANT_ID, empleado_id: id,
+      tipo: nuevoPerm.tipo, fecha_inicio: nuevoPerm.fecha_inicio, fecha_fin: nuevoPerm.fecha_fin,
+      dias: Number(nuevoPerm.dias), goce_sueldo: nuevoPerm.goce_sueldo,
+      folio_imss: nuevoPerm.folio_imss || null, observaciones: nuevoPerm.observaciones || null,
+      estado: 'autorizado',
+    });
+    if (error) { setMsg('Rechazado por la base: ' + error.message); return; }
+    await logAccion('expediente_empleado', 'INSERT', `permiso/incapacidad ${nuevoPerm.tipo}`);
+    setNuevoPerm({ tipo: 'incapacidad_enfermedad_general', fecha_inicio: '', fecha_fin: '', dias: '', goce_sueldo: true, folio_imss: '', observaciones: '' });
+    setPermModalOpen(false); setMsg('Registrado'); cargar();
+  }
+
+  async function cancelarPermiso(pid) {
+    if (!confirm('¿Cancelar este permiso/incapacidad?')) return;
+    const { error } = await supabase.from('te_permisos_empleado').update({ estado: 'cancelado' }).eq('id', pid);
+    if (error) { setMsg('Error: ' + error.message); return; }
+    await logAccion('expediente_empleado', 'UPDATE', `permiso/incapacidad ${pid} cancelado`);
     cargar();
   }
 
@@ -993,6 +1040,33 @@ export default function ExpedienteEmpleado() {
         </>
       )}
 
+      {tab === 'permisos' && (
+        <>
+          <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 10 }}>
+            <button className="btn sm" onClick={() => setPermModalOpen(true)}>+ Registrar permiso/incapacidad</button>
+          </div>
+          <TablaWrap>
+            <table>
+              <thead><tr><th>Tipo</th><th>Período</th><th>Días</th><th>Goce de sueldo</th><th>Folio IMSS</th><th>Estado</th><th></th></tr></thead>
+              <tbody>
+                {permisos.length === 0 && <tr><td colSpan="7" className="empty">Sin permisos ni incapacidades registradas.</td></tr>}
+                {permisos.map(p => (
+                  <tr key={p.id}>
+                    <td><Badge estado={PERM_TIPO_BADGE[p.tipo] || 'inactivo'}>{(PERM_TIPO_LABEL[p.tipo] || p.tipo).toUpperCase()}</Badge></td>
+                    <td style={{ fontSize: 12 }}>{fmtFecha(p.fecha_inicio)} — {fmtFecha(p.fecha_fin)}</td>
+                    <td>{p.dias}</td>
+                    <td>{p.goce_sueldo ? 'Sí' : 'No'}</td>
+                    <td style={{ fontSize: 12 }}>{p.folio_imss || '—'}</td>
+                    <td><Badge estado={p.estado === 'cancelado' ? 'vencido' : p.estado === 'autorizado' ? 'activo' : 'pendiente'}>{p.estado.toUpperCase()}</Badge></td>
+                    <td style={{ textAlign: 'right' }}>{p.estado !== 'cancelado' && <button className="btn ghost sm" onClick={() => cancelarPermiso(p.id)}>Cancelar</button>}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </TablaWrap>
+        </>
+      )}
+
       {tab === 'capacitacion' && (
         <>
           <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 10 }}>
@@ -1238,6 +1312,36 @@ export default function ExpedienteEmpleado() {
             </div>
           </div>
           <div><label className="label">Observaciones (opcional)</label><input className="field" value={nuevoVac.observaciones} onChange={e => setNuevoVac({ ...nuevoVac, observaciones: e.target.value })} /></div>
+        </form>
+      </Modal>
+
+      {/* Modal: registrar permiso/incapacidad */}
+      <Modal open={permModalOpen} onClose={() => setPermModalOpen(false)} title="Registrar permiso/incapacidad"
+        footer={<><button className="btn ghost" onClick={() => setPermModalOpen(false)}>Cancelar</button>
+                <button className="btn" onClick={agregarPermiso}>Guardar</button></>}>
+        <form onSubmit={agregarPermiso} style={{ display: 'grid', gap: 12 }}>
+          <div>
+            <label className="label">Tipo</label>
+            <select className="field" value={nuevoPerm.tipo} onChange={e => setNuevoPerm({ ...nuevoPerm, tipo: e.target.value })}>
+              {Object.entries(PERM_TIPO_LABEL).map(([k, l]) => <option key={k} value={k}>{l}</option>)}
+            </select>
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+            <div><label className="label">Fecha de inicio</label><input type="date" className="field" value={nuevoPerm.fecha_inicio} onChange={e => setNuevoPerm({ ...nuevoPerm, fecha_inicio: e.target.value })} /></div>
+            <div><label className="label">Fecha de fin</label><input type="date" className="field" value={nuevoPerm.fecha_fin} onChange={e => setNuevoPerm({ ...nuevoPerm, fecha_fin: e.target.value })} /></div>
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+            <div><label className="label">Días</label><input type="number" min="0.5" step="0.5" className="field" value={nuevoPerm.dias} onChange={e => setNuevoPerm({ ...nuevoPerm, dias: e.target.value })} /></div>
+            <div>
+              <label className="label">Goce de sueldo</label>
+              <select className="field" value={nuevoPerm.goce_sueldo ? '1' : '0'} onChange={e => setNuevoPerm({ ...nuevoPerm, goce_sueldo: e.target.value === '1' })}>
+                <option value="1">Con goce</option>
+                <option value="0">Sin goce</option>
+              </select>
+            </div>
+          </div>
+          <div><label className="label">Folio IMSS (opcional, para incapacidades)</label><input className="field" value={nuevoPerm.folio_imss} onChange={e => setNuevoPerm({ ...nuevoPerm, folio_imss: e.target.value })} /></div>
+          <div><label className="label">Observaciones (opcional)</label><input className="field" value={nuevoPerm.observaciones} onChange={e => setNuevoPerm({ ...nuevoPerm, observaciones: e.target.value })} /></div>
         </form>
       </Modal>
 
