@@ -9,10 +9,13 @@ const SECCIONES = [
     { path: '/admin/dashboard',      label: 'Dashboard', icono: '📊', requiere: null },
     { path: '/admin/sitios',         label: 'Pedidos y sitios', icono: '📦', requiere: 'pedidos.ver' },
     { path: '/admin/arbol',          label: 'Árbol de reservaciones', icono: '🌳', requiere: 'reservaciones.ver' },
+    { path: '/admin/consulta-reservaciones', label: 'Consulta de reservaciones', icono: '🔎', requiere: 'reservaciones.ver' },
     { path: '/admin/preasignacion',  label: 'Pre-asignación', icono: '🧩', requiere: 'reservaciones.ver' },
     { path: '/admin/asistencia',     label: 'Confirmación asistencia', icono: '✅', requiere: 'checador.ver' },
     { path: '/admin/checador',       label: 'Checador biométrico', icono: '👆', requiere: 'checador.ver' },
-    { path: '/admin/nomina',         label: 'Nómina', icono: '💰', requiere: 'nomina.ver' }
+    { path: '/admin/nomina',         label: 'Nómina', icono: '💰', requiere: 'nomina.ver' },
+    { path: '/admin/extras',         label: 'Extras', icono: '➕', requiere: 'nomina.ver' },
+    { path: '/admin/asignacion-folios', label: 'Asignación de Folios', icono: '🎫', requiere: 'nomina.ver' }
   ]},
   { titulo: 'Comercial', items: [
     { path: '/admin/requisiciones', label: 'Requisiciones de personal', icono: '🧾', requiere: 'requisiciones.ver' },
@@ -33,6 +36,7 @@ const SECCIONES = [
   { titulo: 'Administración', items: [
     { path: '/admin/catalogos',     label: 'Catálogos (HU 9.01)', icono: '📚', requiere: 'catalogos.ver' },
     { path: '/admin/lista-negra',   label: 'Lista negra', icono: '🚫', requiere: 'lista_negra.ver' },
+    { path: '/admin/contactos',     label: 'Contactos de clientes', icono: '👤', requiere: 'contactos.ver' },
     { path: '/admin/usuarios',      label: 'Usuarios y roles (HU 9.03)', icono: '🔐', requiere: 'usuarios.ver' },
     { path: '/admin/config',        label: 'Configuración', icono: '⚙️', requiere: null },
     { path: '/admin/suscripcion',   label: 'Mi suscripción', icono: '💳', requiere: null },
