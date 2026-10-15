@@ -4,12 +4,52 @@ import {
   ResponsiveContainer, BarChart, Bar, LineChart, Line, PieChart, Pie, Cell,
   XAxis, YAxis, CartesianGrid, Tooltip, Legend,
 } from 'recharts';
-import KpiCard from '../../components/ui/KpiCard.jsx';
-import Chip from '../../components/ui/Chip.jsx';
 import TablaWrap from '../../components/ui/TablaWrap.jsx';
-import Badge from '../../components/ui/Badge.jsx';
-import { tituloConLinea } from '../../components/ui/CardHeader.jsx';
 import { useModuleAudit } from '../../lib/audit.js';
+
+// ---------------------------------------------------------------------------
+// Primitivos visuales propios de este módulo (a pedido del usuario 2026-10-14:
+// "debe ser una copia" del look de otro dashboard interno del usuario -- IwolPark,
+// tarjetas blancas con sombra suave, KPIs grandes en bold, pills de color, tabs
+// horizontales subrayadas). Se definen AQUÍ, con el mismo nombre/API que los
+// componentes compartidos de ui/ (KpiCard, Chip, Badge) que reemplazan, para no
+// tocar esos archivos -- son usados por media app y hay otra sesión en paralelo
+// modificando varias pantallas que los consumen (Semaforo.jsx, SitiosAsignacion.jsx,
+// etc.); así el rediseño queda contenido a este módulo, cero riesgo de choque.
+// ---------------------------------------------------------------------------
+function KpiCard({ label, value, sub, color, onClick, drillLabel = 'Ver desglose →' }) {
+  const clickable = typeof onClick === 'function';
+  return (
+    <div onClick={onClick} style={{
+      background: '#fff', border: '1px solid #ECECF1', borderRadius: 16,
+      padding: '16px 18px', boxShadow: '0 1px 2px rgba(20,20,43,.04)',
+      cursor: clickable ? 'pointer' : 'default',
+    }}>
+      <div style={{ fontSize: 10.5, fontWeight: 700, letterSpacing: '.05em', textTransform: 'uppercase', color: '#8E8E99' }}>{label}</div>
+      <div style={{ fontSize: 28, fontWeight: 800, color: color || '#1C1C28', marginTop: 6, lineHeight: 1.1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{value}</div>
+      {sub && <div style={{ fontSize: 11.5, color: '#9696A3', marginTop: 4 }}>{sub}</div>}
+      {clickable && <div style={{ fontSize: 11, color: C.morado, fontWeight: 700, marginTop: 8 }}>{drillLabel}</div>}
+    </div>
+  );
+}
+const BADGE_COLORS = {
+  activo: { bg: '#E7F7EE', fg: '#1E9E5A' }, vencido: { bg: '#FBEAEC', fg: '#D23B51' },
+  pendiente: { bg: '#FDF2E0', fg: '#C8841A' }, proceso: { bg: '#EAF1FD', fg: '#2563C9' },
+  inactivo: { bg: '#F1F1F4', fg: '#7A7A85' },
+};
+function Badge({ estado = 'inactivo', children }) {
+  const c = BADGE_COLORS[estado] || BADGE_COLORS.inactivo;
+  return <span style={{ display: 'inline-block', padding: '3px 10px', borderRadius: 999, fontSize: 11, fontWeight: 700, background: c.bg, color: c.fg, whiteSpace: 'nowrap' }}>{children}</span>;
+}
+function Chip({ active, onClick, children }) {
+  return (
+    <button type="button" onClick={onClick} style={{
+      border: 'none', borderRadius: 999, padding: '6px 13px', fontSize: 12.5, fontWeight: active ? 700 : 500,
+      cursor: 'pointer', whiteSpace: 'nowrap',
+      background: active ? C.morado : '#F1F0F6', color: active ? '#fff' : '#53535F',
+    }}>{children}</button>
+  );
+}
 
 // ===========================================================================
 // Réplica fiel (Fase 3) de los 9 tableros de referencia "Agile HR Analytics"
@@ -26,8 +66,9 @@ import { useModuleAudit } from '../../lib/audit.js';
 // ===========================================================================
 
 const C = {
-  morado: '#7B5EA7', azul: '#0A66C2', ambar: '#D9A441', verde: '#4CAF7D',
+  morado: '#7B5EA7', azul: '#0A66C2', ambar: '#D9A441', verde: '#2FA86B',
   rosa: '#C85C8E', gris: '#9A9AA2', moradoClaro: '#C9B8E8',
+  naranja: '#E8900C', rojo: '#D23B51',
 };
 const SERIE = [C.morado, C.azul, C.ambar, C.verde, C.rosa, C.gris, C.moradoClaro];
 
@@ -112,6 +153,25 @@ function rangoAntiguedad(anios) {
 // ===========================================================================
 // Shell: carga de datos compartida + submenú + barra de filtros
 // ===========================================================================
+const TABS = [
+  { grupo: 'Réplica de referencia', items: [
+    { key: 'resumen', label: 'Resumen', icon: '🧭' },
+    { key: 'diversidad', label: 'Diversidad', icon: '🧑‍🤝‍🧑' },
+    { key: 'unidad', label: 'Unidad de Negocio', icon: '🏢' },
+    { key: 'desempeno', label: 'Desempeño', icon: '🎯' },
+    { key: 'ausentismo', label: 'Ausentismo', icon: '🩺' },
+    { key: 'bajas', label: 'Análisis de Bajas', icon: '📤' },
+    { key: 'rotacion', label: 'Análisis de Rotación', icon: '🔄' },
+    { key: 'prediccion', label: 'Predicción de Rotación', icon: '📈' },
+    { key: 'prediccion_emp', label: 'Predicción — Empleado', icon: '🧑‍💼' },
+  ]},
+  { grupo: 'Otros módulos', items: [
+    { key: 'capacitacion', label: 'Capacitación', icon: '🎓' },
+    { key: 'vacaciones', label: 'Vacaciones', icon: '🏖️' },
+    { key: 'reclutamiento', label: 'Reclutamiento', icon: '🧲' },
+  ]},
+];
+
 export default function PeopleAnalytics() {
   useModuleAudit('people_analytics');
   const [tab, setTab] = useState('resumen');
@@ -120,8 +180,9 @@ export default function PeopleAnalytics() {
   const [unidad, setUnidad] = useState('todas');
   const [loading, setLoading] = useState(true);
   const [D, setD] = useState(null);
+  const [actualizadoEn, setActualizadoEn] = useState(null);
 
-  useEffect(() => { (async () => {
+  async function cargar() {
     setLoading(true);
     const [empleados, puestos, movimientos, evaluaciones, capacitaciones, vacaciones, permisos, riesgo] = await Promise.all([
       fetchVista('v_empleados_detalle', { limit: 5000 }),
@@ -143,79 +204,70 @@ export default function PeopleAnalytics() {
     for (const m of movimientos) if (m.fecha) anios.add(new Date(m.fecha).getFullYear());
     const aniosDisponibles = [...anios].sort();
     setD({ empleados, puestos, movimientos, evaluaciones, capacitaciones, vacaciones, permisos, riesgo, empleadoMap, unidades, aniosDisponibles });
+    setActualizadoEn(new Date());
     setLoading(false);
-  })(); }, []);
-
-  const SUBMENU = [
-    { grupo: 'Réplica de referencia (Agile HR Analytics)', items: [
-      { key: 'resumen', label: 'Resumen', icon: '🧭' },
-      { key: 'diversidad', label: 'Diversidad', icon: '🧑‍🤝‍🧑' },
-      { key: 'unidad', label: 'Unidad de Negocio', icon: '🏢' },
-      { key: 'desempeno', label: 'Calificación de Desempeño', icon: '🎯' },
-      { key: 'ausentismo', label: 'Ausentismo', icon: '🩺' },
-      { key: 'bajas', label: 'Análisis de Bajas', icon: '📤' },
-      { key: 'rotacion', label: 'Análisis de Rotación', icon: '🔄' },
-      { key: 'prediccion', label: 'Predicción de Rotación', icon: '📈' },
-      { key: 'prediccion_emp', label: 'Predicción — Por Empleado', icon: '🧑‍💼' },
-    ]},
-    { grupo: 'Otros módulos PeopleMovil', items: [
-      { key: 'capacitacion', label: 'Capacitación', icon: '🎓' },
-      { key: 'vacaciones', label: 'Vacaciones', icon: '🏖️' },
-      { key: 'reclutamiento', label: 'Reclutamiento', icon: '🧲' },
-    ]},
-  ];
+  }
+  useEffect(() => { cargar(); /* eslint-disable-next-line */ }, []);
 
   const filtros = { anio, mes, unidad };
 
   return (
     <div>
-      <div className="section-eyebrow">Analítica</div>
-      <h1>People Analytics</h1>
-      <p style={{ color: 'var(--muted)', marginBottom: 16 }}>
-        Réplica de los tableros de referencia sobre datos reales del tenant (Data Warehouse,
-        Migraciones 058-061). Se refrescan con "Refrescar DW" en <a href="/admin/dw">Data Warehouse</a>.
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', flexWrap: 'wrap', gap: 10, marginBottom: 4 }}>
+        <div>
+          <div className="section-eyebrow">Analítica</div>
+          <h1 style={{ margin: 0 }}>People Analytics</h1>
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          {actualizadoEn && <span style={{ fontSize: 11.5, color: '#9696A3' }}>Actualizado: {actualizadoEn.toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit' })}</span>}
+          <button type="button" onClick={cargar} disabled={loading} style={{
+            display: 'flex', alignItems: 'center', gap: 6, border: 'none', borderRadius: 10, padding: '8px 14px',
+            background: C.morado, color: '#fff', fontWeight: 700, fontSize: 12.5, cursor: loading ? 'default' : 'pointer', opacity: loading ? .6 : 1,
+          }}>↻ Actualizar</button>
+        </div>
+      </div>
+      <p style={{ color: 'var(--muted)', marginBottom: 16, fontSize: 12.5 }}>
+        Réplica de los tableros de referencia sobre datos reales del tenant (Data Warehouse, Migraciones 058-061).
       </p>
 
       {loading || !D ? (
-        <div className="card"><p style={{ fontSize: 12, color: 'var(--muted)' }}>Cargando datos del Data Warehouse…</p></div>
+        <div style={{ background: '#fff', border: '1px solid #ECECF1', borderRadius: 16, padding: 20 }}>
+          <p style={{ fontSize: 12, color: 'var(--muted)' }}>Cargando datos del Data Warehouse…</p>
+        </div>
       ) : (
-        <div style={{ display: 'grid', gridTemplateColumns: '220px 1fr', gap: 20, alignItems: 'start' }}>
-          <nav className="card" style={{ padding: 10, position: 'sticky', top: 12 }}>
-            {SUBMENU.map(g => (
-              <div key={g.grupo} style={{ marginBottom: 10 }}>
-                <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: '.04em', textTransform: 'uppercase', color: 'var(--muted)', padding: '4px 8px' }}>{g.grupo}</div>
+        <>
+          <div style={{ background: '#fff', border: '1px solid #ECECF1', borderRadius: 16, padding: '6px 10px', marginBottom: 16, boxShadow: '0 1px 2px rgba(20,20,43,.04)' }}>
+            {TABS.map((g, gi) => (
+              <div key={g.grupo} style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', borderTop: gi > 0 ? '1px solid #F1F0F6' : 'none', paddingTop: gi > 0 ? 4 : 0, marginTop: gi > 0 ? 4 : 0 }}>
                 {g.items.map(it => (
                   <button key={it.key} type="button" onClick={() => setTab(it.key)}
                     style={{
-                      display: 'flex', alignItems: 'center', gap: 8, width: '100%', textAlign: 'left',
-                      padding: '7px 8px', borderRadius: 8, border: 'none', cursor: 'pointer', fontSize: 12.5,
-                      background: tab === it.key ? 'var(--accent-tint, #F8F5FF)' : 'transparent',
-                      color: tab === it.key ? 'var(--accent)' : 'var(--text, #1d1d1f)',
-                      fontWeight: tab === it.key ? 700 : 500,
+                      display: 'flex', alignItems: 'center', gap: 6, border: 'none', background: 'none', cursor: 'pointer',
+                      padding: '10px 12px', fontSize: 12.5, whiteSpace: 'nowrap',
+                      color: tab === it.key ? C.morado : '#53535F', fontWeight: tab === it.key ? 700 : 500,
+                      borderBottom: tab === it.key ? `2px solid ${C.morado}` : '2px solid transparent',
                     }}>
                     <span aria-hidden="true">{it.icon}</span>{it.label}
                   </button>
                 ))}
               </div>
             ))}
-          </nav>
-
-          <div>
-            <FiltroBarra D={D} anio={anio} setAnio={setAnio} mes={mes} setMes={setMes} unidad={unidad} setUnidad={setUnidad} />
-            {tab === 'resumen' && <DashResumen D={D} f={filtros} />}
-            {tab === 'diversidad' && <DashDiversidad D={D} f={filtros} />}
-            {tab === 'unidad' && <DashUnidadNegocio D={D} f={filtros} />}
-            {tab === 'desempeno' && <DashDesempeno D={D} f={filtros} />}
-            {tab === 'ausentismo' && <DashAusentismo D={D} f={filtros} />}
-            {tab === 'bajas' && <DashBajas D={D} f={filtros} />}
-            {tab === 'rotacion' && <DashRotacion D={D} f={filtros} />}
-            {tab === 'prediccion' && <DashPrediccion D={D} f={filtros} />}
-            {tab === 'prediccion_emp' && <DashPrediccionEmpleado D={D} />}
-            {tab === 'capacitacion' && <TabCapacitacion />}
-            {tab === 'vacaciones' && <TabVacaciones />}
-            {tab === 'reclutamiento' && <TabReclutamiento />}
           </div>
-        </div>
+
+          <FiltroBarra D={D} anio={anio} setAnio={setAnio} mes={mes} setMes={setMes} unidad={unidad} setUnidad={setUnidad} />
+          {tab === 'resumen' && <DashResumen D={D} f={filtros} />}
+          {tab === 'diversidad' && <DashDiversidad D={D} f={filtros} />}
+          {tab === 'unidad' && <DashUnidadNegocio D={D} f={filtros} />}
+          {tab === 'desempeno' && <DashDesempeno D={D} f={filtros} />}
+          {tab === 'ausentismo' && <DashAusentismo D={D} f={filtros} />}
+          {tab === 'bajas' && <DashBajas D={D} f={filtros} />}
+          {tab === 'rotacion' && <DashRotacion D={D} f={filtros} />}
+          {tab === 'prediccion' && <DashPrediccion D={D} f={filtros} />}
+          {tab === 'prediccion_emp' && <DashPrediccionEmpleado D={D} />}
+          {tab === 'capacitacion' && <TabCapacitacion />}
+          {tab === 'vacaciones' && <TabVacaciones />}
+          {tab === 'reclutamiento' && <TabReclutamiento />}
+        </>
       )}
     </div>
   );
@@ -223,20 +275,20 @@ export default function PeopleAnalytics() {
 
 function FiltroBarra({ D, anio, setAnio, mes, setMes, unidad, setUnidad }) {
   return (
-    <div className="card" style={{ marginBottom: 16, padding: '10px 14px' }}>
+    <div style={{ background: '#fff', border: '1px solid #ECECF1', borderRadius: 16, padding: '12px 16px', marginBottom: 16, boxShadow: '0 1px 2px rgba(20,20,43,.04)' }}>
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 16, alignItems: 'center' }}>
         <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
           <Chip active={anio === 'todos'} onClick={() => { setAnio('todos'); setMes('todos'); }}>Todos</Chip>
           {D.aniosDisponibles.map(a => <Chip key={a} active={anio === String(a)} onClick={() => setAnio(String(a))}>{a}</Chip>)}
         </div>
-        <div style={{ width: 1, alignSelf: 'stretch', background: 'var(--border)' }} />
+        <div style={{ width: 1, alignSelf: 'stretch', background: '#ECECF1' }} />
         <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
           <Chip active={mes === 'todos'} onClick={() => setMes('todos')}>Todo el año</Chip>
           {MESES.map((m, i) => <Chip key={m} active={mes === String(i + 1)} onClick={() => setMes(String(i + 1))}>{m}</Chip>)}
         </div>
-        <div style={{ width: 1, alignSelf: 'stretch', background: 'var(--border)' }} />
+        <div style={{ width: 1, alignSelf: 'stretch', background: '#ECECF1' }} />
         <div>
-          <select className="field" style={{ minWidth: 200 }} value={unidad} onChange={e => setUnidad(e.target.value)}>
+          <select className="field" style={{ minWidth: 200, borderRadius: 10 }} value={unidad} onChange={e => setUnidad(e.target.value)}>
             <option value="todas">Unidad de Negocio: Todas</option>
             {D.unidades.map(u => <option key={u} value={u}>{u}</option>)}
           </select>
@@ -246,22 +298,28 @@ function FiltroBarra({ D, anio, setAnio, mes, setMes, unidad, setUnidad }) {
   );
 }
 
-function Panel({ titulo, children }) {
+function Panel({ titulo, subtitulo, accion, children }) {
   return (
-    <div className="card" style={{ marginBottom: 16 }}>
-      <h3 style={tituloConLinea}>{titulo}</h3>
+    <div style={{ background: '#fff', border: '1px solid #ECECF1', borderRadius: 16, padding: '18px 20px', marginBottom: 16, boxShadow: '0 1px 2px rgba(20,20,43,.04)' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 14, gap: 12 }}>
+        <div>
+          <div style={{ fontWeight: 700, fontSize: 14.5, color: '#1C1C28' }}>{titulo}</div>
+          {subtitulo && <div style={{ fontSize: 11.5, color: '#9696A3', marginTop: 2 }}>{subtitulo}</div>}
+        </div>
+        {accion}
+      </div>
       {children}
     </div>
   );
 }
 function Vacio({ cargando, texto }) {
-  return <div className="empty" style={{ padding: 32, textAlign: 'center', color: 'var(--muted)', fontSize: 12 }}>
+  return <div style={{ padding: 32, textAlign: 'center', color: '#9696A3', fontSize: 12 }}>
     {cargando ? 'Cargando…' : (texto || 'Sin datos para este corte de Año/Mes/Unidad de Negocio.')}
   </div>;
 }
 function GranoSelector({ grano, setGrano }) {
   return (
-    <div className="chips" style={{ marginTop: -4 }}>
+    <div style={{ display: 'flex', gap: 6, marginBottom: 12 }}>
       {GRANOS.map(g => (
         <Chip key={g.key} active={grano === g.key} onClick={() => setGrano(g.key)}>{g.label}</Chip>
       ))}
@@ -836,10 +894,10 @@ function DashPrediccion({ D, f }) {
 
   return (
     <>
-      <div className="card" style={{ marginBottom: 16, fontSize: 12, color: 'var(--muted)' }}>
+      <div style={{ background: '#FDF2E0', border: '1px solid #F3DFB0', borderRadius: 14, padding: '12px 16px', marginBottom: 16, fontSize: 12, color: '#7A5A14' }}>
         ⚠️ Esto <strong>no es un modelo de Machine Learning entrenado</strong> -- es un score heurístico transparente
         (0-100%), combinación ponderada de 5 factores reales (antigüedad, ausentismo, desempeño, capacitación,
-        compensación relativa al puesto). Pesos editables en <a href="/admin/config">Configuración</a>.
+        compensación relativa al puesto). Pesos editables en <a href="/admin/config" style={{ color: '#7A5A14', fontWeight: 700 }}>Configuración</a>.
       </div>
       <div className="kpi-grid">
         <KpiCard label="Empleados activos evaluados" value={fmt(D.riesgo.length)} />
