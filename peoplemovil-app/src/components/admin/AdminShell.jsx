@@ -53,7 +53,7 @@ const SECCIONES = [
 // Etiqueta de build: AAMMDD-HHMM del momento en que se hizo este deploy.
 // Se actualiza a mano en cada release para poder confirmar a simple vista
 // qué versión quedó realmente publicada (pedido del usuario 2026-10-08).
-const BUILD_TAG = '261014-1726';
+const BUILD_TAG = '261016-0257';
 
 export default function AdminShell() {
   const [openMobile, setOpenMobile] = useState(false);
