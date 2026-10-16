@@ -659,12 +659,24 @@ function round1(n) { return Math.round(n * 10) / 10; }
 // ===========================================================================
 // 5. Ausentismo
 // ===========================================================================
+const DIAS_SEMANA = ['Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb', 'Dom'];
+
 function DashAusentismo({ D, f }) {
   const permisos = useMemo(() => filtraPorUnidadYFecha(D, D.permisos.filter(p => p.estado !== 'cancelado'), f), [D, f.anio, f.mes, f.unidad]);
   const diasTotales = permisos.reduce((s, p) => s + Number(p.dias || 0), 0);
   const diasIncapacidad = permisos.filter(p => (p.tipo || '').startsWith('incapacidad')).reduce((s, p) => s + Number(p.dias || 0), 0);
   const diasSinGoce = permisos.filter(p => !p.goce_sueldo).reduce((s, p) => s + Number(p.dias || 0), 0);
   const empleadosAfectados = new Set(permisos.map(p => p.empleado_id)).size;
+
+  // Costo aproximado -- tarifa diaria de referencia = sueldo de la plaza vigente
+  // del empleado (mismo dato que usa v_riesgo_rotacion_empleado para el factor
+  // de compensación). Es una APROXIMACIÓN explícita, no un cálculo de nómina
+  // real: el régimen de pago de PeopleMovil es por turno/evento, no salario
+  // mensual fijo, así que "sueldo × días" no es la fórmula de nómina real --
+  // mismo criterio de honestidad que "costo aproximado" en Data Warehouse
+  // (CLAUDE.md §11, pago_default × turnos).
+  const sueldoMap = useMemo(() => new Map(D.riesgo.map(r => [r.empleado_id, r.sueldo_actual])), [D]);
+  const costoTotal = permisos.reduce((s, p) => s + Number(p.dias || 0) * Number(sueldoMap.get(p.empleado_id) || 0), 0);
 
   const porTipo = useMemo(() => {
     const m = new Map();
@@ -681,6 +693,35 @@ function DashAusentismo({ D, f }) {
     return [...m.entries()].map(([unidad, dias]) => ({ unidad, dias })).sort((a, b) => b.dias - a.dias).slice(0, 12);
   }, [permisos, D]);
 
+  const costoPorUnidad = useMemo(() => {
+    const m = new Map();
+    for (const p of permisos) {
+      const u = unidadDe(D, p.empleado_id) || 'Sin unidad';
+      const costo = Number(p.dias || 0) * Number(sueldoMap.get(p.empleado_id) || 0);
+      m.set(u, (m.get(u) || 0) + costo);
+    }
+    return [...m.entries()].map(([unidad, costo]) => ({ unidad, costo })).filter(r => r.costo > 0).sort((a, b) => b.costo - a.costo).slice(0, 12);
+  }, [permisos, D, sueldoMap]);
+
+  const porFecha = useMemo(() => {
+    const m = new Map();
+    for (const p of permisos) {
+      if (!p.fecha) continue;
+      m.set(p.fecha, (m.get(p.fecha) || 0) + Number(p.dias || 0));
+    }
+    return [...m.entries()].sort((a, b) => a[0].localeCompare(b[0])).map(([fecha, dias]) => ({ fecha, dias }));
+  }, [permisos]);
+
+  const porDiaSemana = useMemo(() => {
+    const arr = DIAS_SEMANA.map(dia => ({ dia, dias: 0 }));
+    for (const p of permisos) {
+      const d = parseFecha(p.fecha);
+      if (!d) continue;
+      arr[(d.getDay() + 6) % 7].dias += Number(p.dias || 0);
+    }
+    return arr;
+  }, [permisos]);
+
   return (
     <>
       <div className="kpi-grid">
@@ -688,6 +729,7 @@ function DashAusentismo({ D, f }) {
         <KpiCard label="Días por incapacidad" value={fmt(diasIncapacidad)} color={C.ambar} />
         <KpiCard label="Días sin goce de sueldo" value={fmt(diasSinGoce)} />
         <KpiCard label="Empleados afectados" value={fmt(empleadosAfectados)} />
+        <KpiCard label="Costo aproximado" value={fmt$(costoTotal)} color={C.naranja} sub="tarifa diaria de referencia × días" />
       </div>
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
         <Panel titulo="Días por tipo de permiso/incapacidad">
@@ -712,6 +754,47 @@ function DashAusentismo({ D, f }) {
                 <YAxis type="category" dataKey="unidad" width={140} tick={{ fontSize: 11 }} />
                 <Tooltip />
                 <Bar dataKey="dias" fill={C.rosa} radius={[0, 4, 4, 0]} />
+              </BarChart>
+            </ResponsiveContainer>
+          )}
+        </Panel>
+      </div>
+      <Panel titulo="Días de ausentismo por fecha">
+        {porFecha.length === 0 ? <Vacio /> : (
+          <ResponsiveContainer width="100%" height={240}>
+            <LineChart data={porFecha}>
+              <CartesianGrid strokeDasharray="3 3" />
+              <XAxis dataKey="fecha" tick={{ fontSize: 10 }} />
+              <YAxis allowDecimals={false} />
+              <Tooltip />
+              <Line type="monotone" dataKey="dias" name="Días" stroke={C.rosa} strokeWidth={2} dot={false} />
+            </LineChart>
+          </ResponsiveContainer>
+        )}
+      </Panel>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+        <Panel titulo="Días de ausentismo por día de la semana">
+          {permisos.length === 0 ? <Vacio /> : (
+            <ResponsiveContainer width="100%" height={220}>
+              <BarChart data={porDiaSemana}>
+                <CartesianGrid strokeDasharray="3 3" />
+                <XAxis dataKey="dia" tick={{ fontSize: 11 }} />
+                <YAxis allowDecimals={false} />
+                <Tooltip />
+                <Bar dataKey="dias" fill={C.ambar} radius={[4, 4, 0, 0]} />
+              </BarChart>
+            </ResponsiveContainer>
+          )}
+        </Panel>
+        <Panel titulo="Costo aproximado por unidad de negocio" subtitulo="tarifa diaria de referencia × días -- ver nota en el KPI">
+          {costoPorUnidad.length === 0 ? <Vacio texto="Sin datos de sueldo para calcular costo en este corte." /> : (
+            <ResponsiveContainer width="100%" height={Math.max(180, costoPorUnidad.length * 30)}>
+              <BarChart data={costoPorUnidad} layout="vertical" margin={{ left: 60 }}>
+                <CartesianGrid strokeDasharray="3 3" horizontal={false} />
+                <XAxis type="number" allowDecimals={false} />
+                <YAxis type="category" dataKey="unidad" width={140} tick={{ fontSize: 11 }} />
+                <Tooltip formatter={v => fmt$(v)} />
+                <Bar dataKey="costo" fill={C.naranja} radius={[0, 4, 4, 0]} />
               </BarChart>
             </ResponsiveContainer>
           )}
